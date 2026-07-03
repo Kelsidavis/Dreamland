@@ -457,6 +457,31 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       </div>
       <div class="fleet-col">
         <div class="fleet-section">
+          <h3>Orchestrate</h3>
+          <textarea id="orch-goal" rows="3"
+                    placeholder="Goal — the fleet plans, executes across workers, verifies, and repairs. e.g. Create stats.py with mean/median functions and a demo main block."
+                    style="width:100%;background:var(--bg-input);color:var(--text);
+                           border:1px solid var(--border);border-radius:4px;
+                           padding:6px 8px;margin-bottom:6px;font-family:var(--mono);
+                           font-size:0.8em;resize:vertical"></textarea>
+          <input type="text" id="orch-workspace"
+                 placeholder="workspace dir (optional, e.g. /tmp/build)"
+                 style="width:100%;background:var(--bg-input);color:var(--text);
+                        border:1px solid var(--border);border-radius:4px;
+                        padding:6px 8px;margin-bottom:6px;font-family:var(--mono);
+                        font-size:0.8em">
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+                      font-size:0.8em;margin-bottom:8px">
+            <label><input type="checkbox" id="orch-verify" checked> verify each task</label>
+            <label><input type="checkbox" id="orch-repair" checked> audit + repair</label>
+            <button class="tb-btn" id="orch-start-btn">start</button>
+            <button class="tb-btn" id="orch-cancel-btn" style="display:none;color:var(--red)">cancel</button>
+          </div>
+          <div id="orch-status" style="font-family:var(--mono);font-size:11px;
+                                       color:var(--text-dim);margin-bottom:8px"></div>
+          <div class="fleet-list" id="orch-tasks"></div>
+        </div>
+        <div class="fleet-section">
           <h3>Routes</h3>
           <div class="fleet-list" id="fleet-routes-list"></div>
         </div>
@@ -1229,6 +1254,103 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       clearInterval(fleetRefreshTimer);
       fleetRefreshTimer = null;
     }
+  }
+
+  // ---- Orchestrate section -------------------------------------------
+  // Drives the background orchestration API: POST {background:true}
+  // returns an id immediately; poll GET /api/orchestrate/<id> for live
+  // per-task progress; DELETE cancels. State survives closing the panel
+  // — reopening shows the run still going.
+  let orchId = null;
+  let orchTimer = null;
+
+  function orchEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function orchRender(data) {
+    const statusEl = document.getElementById('orch-status');
+    const listEl = document.getElementById('orch-tasks');
+    const tasks = data.tasks || [];
+    const done = tasks.filter(t => t.status === 'completed').length;
+    let line = data.state + ': ' + done + '/' + tasks.length + ' tasks';
+    if (!tasks.length && data.state === 'running') line += ' (planning…)';
+    if (data.goal_achieved === true) line += ' — goal audit: ACHIEVED';
+    if (data.goal_achieved === false) line += ' — goal audit: INCOMPLETE';
+    if (data.repair_tasks_added) line += ' (' + data.repair_tasks_added + ' repair task(s))';
+    if (data.error) line += ' — ' + data.error;
+    statusEl.textContent = line;
+
+    listEl.innerHTML = tasks.map(function(t, i) {
+      const icon = {completed:'✓', failed:'✗', skipped:'–',
+                    running:'⟳', pending:'·'}[t.status] || '?';
+      const color = {completed:'var(--green)', failed:'var(--red)',
+                     skipped:'var(--yellow)', running:'var(--cyan)'}[t.status] || 'var(--text-dim)';
+      const bits = [];
+      if (t.extract_to) bits.push(orchEsc(t.extract_to));
+      if (t.verified === true) bits.push('verified');
+      if (t.attempts > 1) bits.push('attempts=' + t.attempts);
+      const out = t.run_output
+        ? '<div style="color:var(--text-dim);font-size:10px;white-space:pre-wrap">' +
+          orchEsc(t.run_output.slice(0, 160)) + '</div>'
+        : '';
+      return '<div class="fleet-card" style="padding:8px 10px">' +
+        '<div style="font-family:var(--mono);font-size:11px">' +
+        '<span style="color:' + color + '">' + icon + '</span> ' +
+        i + '. <strong>' + orchEsc(t.role) + '</strong>' +
+        (bits.length ? ' <span style="color:var(--text-dim)">[' + bits.join(', ') + ']</span>' : '') +
+        '</div>' + out + '</div>';
+    }).join('');
+
+    if (data.goal_achieved === false && data.goal_feedback) {
+      listEl.innerHTML += '<div class="fleet-card" style="padding:8px 10px;font-size:10px;' +
+        'font-family:var(--mono);color:var(--yellow)">gaps: ' +
+        orchEsc(data.goal_feedback.slice(0, 300)) + '</div>';
+    }
+  }
+
+  async function orchPoll() {
+    if (!orchId) return;
+    try {
+      const data = await apiGet('/api/orchestrate/' + encodeURIComponent(orchId));
+      orchRender(data);
+      if (data.state !== 'running') orchStop();
+    } catch (e) { /* transient poll failure — next tick retries */ }
+  }
+
+  function orchStop() {
+    if (orchTimer !== null) { clearInterval(orchTimer); orchTimer = null; }
+    document.getElementById('orch-cancel-btn').style.display = 'none';
+    document.getElementById('orch-start-btn').disabled = false;
+  }
+
+  async function orchStart() {
+    const goal = document.getElementById('orch-goal').value.trim();
+    if (!goal) { alert('Enter a goal first.'); return; }
+    const body = {
+      goal: goal,
+      background: true,
+      verify: document.getElementById('orch-verify').checked,
+      repair: document.getElementById('orch-repair').checked,
+    };
+    const ws = document.getElementById('orch-workspace').value.trim();
+    if (ws) body.workspace_dir = ws;
+    const data = await apiPost('/api/orchestrate', body);
+    if (data.error) { alert('Orchestration failed to start: ' + data.error); return; }
+    orchId = data.orchestration_id;
+    document.getElementById('orch-status').textContent = 'running: submitted (planning…)';
+    document.getElementById('orch-tasks').innerHTML = '';
+    document.getElementById('orch-cancel-btn').style.display = '';
+    document.getElementById('orch-start-btn').disabled = true;
+    if (orchTimer === null) orchTimer = setInterval(orchPoll, 2000);
+  }
+
+  async function orchCancel() {
+    if (!orchId) return;
+    await apiDelete('/api/orchestrate/' + encodeURIComponent(orchId));
+    await orchPoll();
+    orchStop();
   }
 
   async function updateWorkerState(workerId, payload) {
@@ -2178,6 +2300,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     }, 1500);
   });
   fleetCloseBtn.addEventListener('click',closeFleetPanel);
+  document.getElementById('orch-start-btn').addEventListener('click',orchStart);
+  document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
 
   // ── Memory panel ──────────────────────────────────────────────────
   const memoryOverlay = document.getElementById('memory-overlay');

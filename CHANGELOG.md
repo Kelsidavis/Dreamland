@@ -30,6 +30,9 @@ on a two-worker MLX fleet:
   fleet's concurrency so it plans independent branches.
 - **Background runs**: `{"background": true}` → id + live
   `GET/DELETE /api/orchestrate/<id>`; CLI `--watch` streams progress.
+- **Web UI**: the fleet panel gains an Orchestrate section — enter a
+  goal, toggle verify/repair, watch per-task progress live, cancel
+  mid-run. Backed by the background API.
 - **Collaboration grounding**: dependents receive a dependency's
   current on-disk file contents (not its chat blob) plus actual
   execution output.
