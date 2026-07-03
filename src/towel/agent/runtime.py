@@ -270,11 +270,52 @@ class AgentRuntime:
             raise ValueError(f"Unsupported inference mode: {request.get('mode')}")
 
         loop = asyncio.get_event_loop()
-        prompt = request["prompt"]
+        prompt = self._render_request_prompt(request)
         max_tokens = request.get("max_tokens")
         return await loop.run_in_executor(
             self._mlx_executor, self._generate_prompt_sync, prompt, max_tokens
         )
+
+    def _render_request_prompt(self, request: dict[str, Any]) -> str:
+        """Resolve the prompt string from an inference-request payload.
+
+        Two payload shapes reach a worker's *_from_request methods:
+
+        - ``{"prompt": "..."}`` — a prompt prebuilt by the coordinator
+          (``build_inference_request``). Used verbatim.
+        - ``{"system": "...", "messages": [...]}`` — the chat-style
+          payload the coordinator's quick-infer path sends to every
+          worker regardless of backend. The llama runtime consumes it
+          natively; here we render it through the tokenizer's chat
+          template. Without this branch an MLX worker crashed with
+          ``KeyError: 'prompt'`` on every chat-fast dispatch.
+        """
+        if "prompt" in request:
+            return request["prompt"]
+        messages: list[dict[str, Any]] = []
+        system = request.get("system", "")
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.extend(request.get("messages", []))
+        if not messages:
+            raise ValueError(
+                "inference request has neither 'prompt' nor 'messages'"
+            )
+        if self._tokenizer and hasattr(self._tokenizer, "apply_chat_template"):
+            return self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                # Same rationale as _build_prompt: suppress thinking-
+                # channel output on the capped-token quick path unless
+                # the caller explicitly asked for reasoning.
+                enable_thinking=request.get("reasoning_effort", "none") != "none",
+            )
+        # Tokenizer without a chat template (tests, exotic models):
+        # plain role-tagged transcript.
+        return "\n\n".join(
+            f"{m['role']}: {m['content']}" for m in messages
+        ) + "\n\nassistant:"
 
     def _make_turboquant_cache(self) -> list | None:
         """Build a TurboQuant prompt cache if enabled, else None."""
@@ -362,12 +403,15 @@ class AgentRuntime:
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         cancel_flag = self._cancel
+        # Render outside the executor thread — raises reach the caller
+        # instead of dying silently inside _stream_sync.
+        rendered_prompt = self._render_request_prompt(request)
 
         def _stream_sync() -> None:
             from mlx_lm import stream_generate
             from mlx_lm.sample_utils import make_sampler
 
-            prompt = request["prompt"]
+            prompt = rendered_prompt
             sampler = make_sampler(
                 temp=self.config.model.temperature,
                 top_p=self.config.model.top_p,

@@ -326,3 +326,80 @@ class TestRegistrySuggestions:
         skills.register(DummySkill())
 
         assert skills.suggest_tools("read_files") == ["read_file"]
+
+
+class TestRenderRequestPrompt:
+    """The coordinator's quick-infer path sends `{system, messages}`
+    payloads to every worker regardless of backend; the MLX runtime
+    must render those through the chat template instead of KeyError'ing
+    on the missing `prompt` field (live regression 2026-07-03)."""
+
+    def test_prompt_key_used_verbatim(self):
+        runtime = AgentRuntime(TowelConfig())
+        req = {"mode": "mlx_prompt", "prompt": "raw prompt"}
+        assert runtime._render_request_prompt(req) == "raw prompt"
+
+    def test_messages_rendered_via_chat_template(self):
+        runtime = AgentRuntime(TowelConfig())
+
+        class _FakeTokenizer:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            def apply_chat_template(self, messages, **kwargs):
+                self.calls.append({"messages": messages, **kwargs})
+                return "RENDERED"
+
+        tok = _FakeTokenizer()
+        runtime._tokenizer = tok
+        req = {
+            "mode": "mlx_prompt",
+            "system": "be brief",
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": "none",
+        }
+        assert runtime._render_request_prompt(req) == "RENDERED"
+        call = tok.calls[0]
+        assert call["messages"][0] == {"role": "system", "content": "be brief"}
+        assert call["messages"][1] == {"role": "user", "content": "hi"}
+        assert call["add_generation_prompt"] is True
+        # reasoning_effort=none (and absent) must suppress thinking.
+        assert call["enable_thinking"] is False
+
+    def test_reasoning_effort_enables_thinking(self):
+        runtime = AgentRuntime(TowelConfig())
+
+        class _FakeTokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                self.kwargs = kwargs
+                return "R"
+
+        tok = _FakeTokenizer()
+        runtime._tokenizer = tok
+        req = {
+            "mode": "mlx_prompt",
+            "messages": [{"role": "user", "content": "think hard"}],
+            "reasoning_effort": "high",
+        }
+        runtime._render_request_prompt(req)
+        assert tok.kwargs["enable_thinking"] is True
+
+    def test_no_tokenizer_falls_back_to_transcript(self):
+        runtime = AgentRuntime(TowelConfig())
+        runtime._tokenizer = None
+        req = {
+            "mode": "mlx_prompt",
+            "system": "sys",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        out = runtime._render_request_prompt(req)
+        assert "sys" in out
+        assert "hello" in out
+        assert out.endswith("assistant:")
+
+    def test_neither_prompt_nor_messages_raises(self):
+        import pytest
+
+        runtime = AgentRuntime(TowelConfig())
+        with pytest.raises(ValueError, match="neither"):
+            runtime._render_request_prompt({"mode": "mlx_prompt"})
