@@ -1223,25 +1223,65 @@ class Orchestrator:
         file name, a requirement no subtask covered, an artifact whose
         actual output contradicts the spec).
 
-        Returns ``(True, "")`` on an ACHIEVED verdict, ``(False,
-        gaps)`` on INCOMPLETE, and ``(None, note)`` when the auditor is
-        unavailable or gives no parseable verdict — same fail-open
-        stance as `_verify_result`: a flaky auditor must not sink a
-        finished orchestration.
+        When the fleet has capacity, a PANEL of up to three auditors
+        votes concurrently and the majority verdict wins. A single
+        auditor's verdict was observed (three separate live runs) to
+        false-negative on outcomes whose execution output was plainly
+        correct; independent votes make one hallucinated gap an
+        outvoted minority instead of the final word. A tie counts as
+        INCOMPLETE — the follow-through bias: repair is one bounded
+        round and gets re-audited, while a wrongly-passed goal is
+        silent.
+
+        Returns ``(True, "")`` on an ACHIEVED majority, ``(False,
+        gaps)`` on INCOMPLETE, and ``(None, note)`` when no auditor
+        produced a parseable verdict — same fail-open stance as
+        `_verify_result`: a flaky panel must not sink a finished
+        orchestration.
         """
-        import re
         summary = self._orchestration_summary(result, workspace_dir)
         prompt = (
             "You are auditing whether a multi-agent orchestration "
             "achieved its goal.\n\n"
             f"Goal: {goal}\n\n"
             f"What actually happened:\n{summary}\n\n"
-            "Judge ONLY against the stated goal. Actual execution "
-            "output outweighs any claims in result excerpts. Reply "
-            "with exactly one line: 'VERDICT: ACHIEVED' or 'VERDICT: "
-            "INCOMPLETE — <each concrete gap and which file/task it "
-            "concerns>'."
+            "Judge ONLY against the stated goal, using this rule of "
+            "evidence: 'actual execution output' lines are ground "
+            "truth from really running the files. If the execution "
+            "output demonstrates the behavior the goal requires, the "
+            "verdict is ACHIEVED — do not speculate about code you "
+            "cannot see. Result excerpts are truncated; a function "
+            "not visible in an excerpt is NOT a gap. Only report a "
+            "gap you can point to in the goal that no evidence "
+            "satisfies. Reply with exactly one line: 'VERDICT: "
+            "ACHIEVED' or 'VERDICT: INCOMPLETE — <each concrete gap "
+            "and which file/task it concerns>'."
         )
+        panel = min(3, self._concurrency_slots())
+        votes = await asyncio.gather(
+            *[self._audit_once(prompt) for _ in range(panel)],
+        )
+        valid = [(v, gaps) for v, gaps in votes if v is not None]
+        if not valid:
+            # All auditors unavailable/unparseable; surface one note.
+            return None, votes[0][1]
+        achieved = sum(1 for v, _ in valid if v)
+        incomplete_gaps = [gaps for v, gaps in valid if not v]
+        log.info(
+            "check_goal: panel=%d valid=%d achieved=%d incomplete=%d",
+            panel, len(valid), achieved, len(incomplete_gaps),
+        )
+        if achieved > len(incomplete_gaps):
+            return True, ""
+        # Merge distinct gap lists so the repair planner sees every
+        # complaint the majority raised.
+        merged = "\n".join(dict.fromkeys(incomplete_gaps))
+        return False, merged[:1500]
+
+    async def _audit_once(self, prompt: str) -> tuple[bool | None, str]:
+        """One auditor's vote: (True, ''), (False, gaps), or
+        (None, note) for unavailable/unparseable."""
+        import re
         try:
             text = await self._run_agent("reviewer", prompt)
         except Exception as exc:
@@ -1249,9 +1289,7 @@ class Orchestrator:
             return None, f"goal audit unavailable: {exc}"
         match = re.search(r"VERDICT:\s*(ACHIEVED|INCOMPLETE)", text, re.IGNORECASE)
         if match is None:
-            log.warning(
-                "check_goal: no parseable verdict: %r", text[:120],
-            )
+            log.warning("check_goal: no parseable verdict: %r", text[:120])
             return None, "goal audit returned no parseable verdict"
         if match.group(1).upper() == "ACHIEVED":
             return True, ""

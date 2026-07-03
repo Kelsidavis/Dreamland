@@ -1253,6 +1253,11 @@ class TestGoalCheckAndRepair:
                 self.roles: list[str] = []
                 self.repair_prompt: str | None = None
 
+            def available_worker_count(self) -> int:
+                # Single worker → single-auditor panel, so the audit
+                # sequencing below stays deterministic.
+                return 1
+
             async def dispatch_role_task(  # noqa: PLR0913
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
@@ -1374,6 +1379,9 @@ class TestGoalCheckAndRepair:
             def __init__(self) -> None:
                 self.audits = 0
                 self.coder_prompts: list[str] = []
+
+            def available_worker_count(self) -> int:
+                return 1
 
             async def dispatch_role_task(  # noqa: PLR0913
                 self, role, role_system, prompt, *, session_id, max_tokens,
@@ -1619,3 +1627,97 @@ class TestDiskTruthDepContext:
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
         assert "Result from researcher" in dispatcher.calls[1]["prompt"]
+
+
+class TestAuditPanel:
+    """On a multi-worker fleet the goal audit is a majority-vote panel
+    — one hallucinated gap becomes an outvoted minority instead of the
+    final word (single-auditor false-negatives observed live 3x)."""
+
+    def test_majority_outvotes_false_negative(self):
+        from towel.config import TowelConfig
+
+        class _Panel:
+            def __init__(self) -> None:
+                self.reviews = 0
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    self.reviews += 1
+                    if self.reviews == 2:
+                        return "VERDICT: INCOMPLETE — hallucinated gap"
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _Panel()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
+        assert dispatcher.reviews == 3
+        # 2 ACHIEVED vs 1 INCOMPLETE → achieved.
+        assert result.goal_achieved is True
+
+    def test_tie_counts_as_incomplete_with_merged_gaps(self):
+        from towel.agent.orchestrator import WorkerDispatchError
+        from towel.config import TowelConfig
+
+        class _Split:
+            def __init__(self) -> None:
+                self.reviews = 0
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    self.reviews += 1
+                    if self.reviews == 1:
+                        return "VERDICT: ACHIEVED"
+                    if self.reviews == 2:
+                        return "VERDICT: INCOMPLETE — missing avg key"
+                    # Third auditor unavailable → 1-1 among valid votes.
+                    raise WorkerDispatchError("no worker")
+                return "done"
+
+        dispatcher = _Split()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
+        # Tie → follow-through bias: INCOMPLETE, gaps preserved.
+        assert result.goal_achieved is False
+        assert "missing avg key" in result.goal_feedback
+
+    def test_single_worker_fleet_audits_once(self):
+        from towel.config import TowelConfig
+
+        class _Solo:
+            def __init__(self) -> None:
+                self.reviews = 0
+
+            def available_worker_count(self) -> int:
+                return 1
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    self.reviews += 1
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _Solo()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
+        assert dispatcher.reviews == 1
+        assert result.goal_achieved is True

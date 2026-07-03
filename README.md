@@ -234,6 +234,42 @@ curl http://127.0.0.1:18743/v1/chat/completions \
   -d '{"model":"default","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+### Multi-worker orchestration
+
+Give the fleet a goal; it plans, executes, checks, and repairs:
+
+```bash
+# The fleet decomposes the goal itself, runs subtasks in parallel
+# across workers, reviewer-checks every result, executes generated
+# Python (run_check), audits the outcome against the goal, and runs
+# one repair round if the audit finds gaps.
+towel orchestrate \
+  --goal "Create stats.py with mean/median functions and a demo main block" \
+  --workspace /tmp/build --verify --repair --watch
+```
+
+- **Auto-planning** — omit `--task` and a planner-role worker produces
+  the task DAG (roles, dependencies, output files), sized to the
+  fleet's actual concurrency.
+- **Parallel by default** — dependency-aware readiness scheduling:
+  each task launches the moment its dependencies finish, throttled to
+  the number of connected workers.
+- **Follow-through** — syntax + substance validation on extracted
+  files, optional reviewer verification per task (`--verify`),
+  coordinator-side execution of generated Python (`run_check`), and
+  feedback-carrying retries: a rejected attempt retries with the
+  specific failure appended, not a blind re-roll.
+- **Goal audit + repair** (`--repair`) — a majority-vote reviewer
+  panel audits the finished run against the goal; on gaps, a targeted
+  repair plan (grounded in the current file contents) executes and the
+  goal is re-audited once.
+- **Background runs** — `--watch` streams live progress; via the API,
+  `POST /api/orchestrate {"background": true}` returns an id and
+  `GET/DELETE /api/orchestrate/<id>` polls or cancels.
+
+Hand-authored plans still work: `towel orchestrate plan.json` or
+repeated `--task "role:prompt@deps+tools"` specs.
+
 ### Extensible
 
 ```bash

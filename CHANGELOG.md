@@ -6,6 +6,37 @@ a glance whether a release affects you.
 
 ## Unreleased
 
+### Orchestrator: goal-driven multi-worker builds (2026-07-03)
+
+The orchestrator went from "execute a hand-written task list" to a
+full goal → plan → execute → check → repair pipeline, verified live
+on a two-worker MLX fleet:
+
+- **Auto-planning**: `towel orchestrate --goal "…"` with no tasks —
+  a planner-role worker emits the task DAG; malformed plans retry
+  with the validation error fed back; planner quirks that feedback
+  can't fix (schema echo, duplicate file writers, stale task indices
+  in `depends_on`) are normalized instead of rejected.
+- **Follow-through**: per-task reviewer verification (`verify`),
+  coordinator-side execution of generated Python (`run_check`) with
+  stderr fed into the retry prompt, and rejection-carrying retries.
+- **Goal audit + one adaptive repair round** (`goal_check` /
+  `repair`): a majority-vote reviewer panel judges the whole outcome
+  against the goal; on gaps, a repair plan grounded in current file
+  contents executes and is re-audited.
+- **Fleet-aware parallel scheduling (now the default)**: readiness
+  scheduling launches each task when its dependencies finish,
+  throttled to the connected-worker count; the planner is told the
+  fleet's concurrency so it plans independent branches.
+- **Background runs**: `{"background": true}` → id + live
+  `GET/DELETE /api/orchestrate/<id>`; CLI `--watch` streams progress.
+- **Collaboration grounding**: dependents receive a dependency's
+  current on-disk file contents (not its chat blob) plus actual
+  execution output.
+- **Fixed**: MLX workers crashed with `KeyError: 'prompt'` on every
+  chat-fast dispatch (coordinator sends `{system, messages}`; the MLX
+  runtime now renders it through the chat template).
+
 A heavy-development day focused on fleet coordination, model awareness,
 and onboarding. ~52 commits.
 
