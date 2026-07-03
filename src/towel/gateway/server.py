@@ -57,6 +57,7 @@ from towel.nodes.roles import (
     worker_quality_tier,
 )
 from towel.nodes.tracker import NodeTracker
+from towel.persistence.orchestrations import OrchestrationStore
 from towel.persistence.session_pins import SessionPinStore
 from towel.persistence.store import ConversationStore
 from towel.persistence.worker_state import WorkerStateStore
@@ -202,6 +203,7 @@ class GatewayServer:
     )
     pin_store: SessionPinStore = field(default_factory=SessionPinStore)
     worker_state_store: WorkerStateStore = field(default_factory=WorkerStateStore)
+    orch_store: OrchestrationStore = field(default_factory=OrchestrationStore)
     _ws_server: Server | None = None
     _connections: dict[str, ServerConnection] = field(default_factory=dict)
     _active_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
@@ -228,10 +230,29 @@ class GatewayServer:
     # mutate in place, so GET /api/orchestrate/<id> shows real-time
     # progress), the asyncio.Task driving it, and the final result.
     _orchestrations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Terminal orchestration records (background AND sync), hydrated
+    # from orch_store at startup so history survives restarts.
+    _orch_history: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._session_pins = self.pin_store.load()
         self._worker_states = self.worker_state_store.load()
+        # Orchestration history survives restarts; anything persisted
+        # as still "running" was interrupted by the restart — the
+        # asyncio task driving it is gone, so mark it honestly rather
+        # than showing a phantom run forever in progress.
+        self._orch_history = self.orch_store.load()
+        interrupted = [
+            rec for rec in self._orch_history.values()
+            if rec.get("state") == "running"
+        ]
+        for rec in interrupted:
+            rec["state"] = "interrupted"
+        if interrupted:
+            try:
+                self.orch_store.save(self._orch_history)
+            except OSError as exc:
+                log.warning("orchestration history save failed: %s", exc)
         # Hydrate manual task overrides from disk so they survive a
         # coordinator restart, not just a worker reconnect. Unknown task
         # values are silently skipped — schema may have evolved.
@@ -2876,6 +2897,45 @@ class GatewayServer:
                 for t in tasks
             ],
         }
+
+    def _persist_orchestration(
+        self,
+        oid: str,
+        goal: str,
+        tasks: list[Any],
+        workspace_dir: str | None,
+        auto_plan: bool,
+        *,
+        state: str,
+        result: Any = None,
+        created_at: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Write an orchestration snapshot into history + disk.
+
+        Called at submission (state=running — so a coordinator crash
+        leaves an honest 'interrupted' record instead of nothing) and
+        at every terminal transition. Persistence failures are logged,
+        never raised: history is a convenience, the run result still
+        goes back to the caller.
+        """
+        record = self._orchestration_response(
+            goal, tasks, workspace_dir, auto_plan,
+            state=state, result=result,
+        )
+        from datetime import UTC, datetime
+        record["orchestration_id"] = oid
+        if error:
+            record["error"] = error
+        prev = self._orch_history.get(oid) or {}
+        record["created_at"] = created_at or prev.get("created_at") or (
+            datetime.now(UTC).isoformat(timespec="seconds")
+        )
+        self._orch_history[oid] = record
+        try:
+            self.orch_store.save(self._orch_history)
+        except OSError as exc:
+            log.warning("orchestration history save failed: %s", exc)
 
     def available_worker_count(self) -> int:
         """How many workers can accept orchestrator subtasks right now.
@@ -7474,6 +7534,7 @@ class GatewayServer:
             )
 
             if not background:
+                oid = uuid.uuid4().hex[:12]
                 if auto_plan:
                     try:
                         tasks = await orch.plan(goal, verify=verify_all_raw)
@@ -7490,6 +7551,10 @@ class GatewayServer:
                             {"error": f"auto-plan failed: {_err_str(exc)}"},
                             status_code=502,
                         )
+                self._persist_orchestration(
+                    oid, goal, tasks, workspace_dir, auto_plan,
+                    state="running",
+                )
                 try:
                     result = await orch.run_goal(
                         goal, tasks,
@@ -7501,13 +7566,23 @@ class GatewayServer:
                     )
                 except Exception as exc:
                     log.exception("orchestrator run failed: %s", exc)
+                    self._persist_orchestration(
+                        oid, goal, tasks, workspace_dir, auto_plan,
+                        state="failed", error=_err_str(exc),
+                    )
                     return JSONResponse(
                         {"error": _err_str(exc)}, status_code=500,
                     )
-                return JSONResponse(self._orchestration_response(
+                self._persist_orchestration(
+                    oid, goal, result.tasks, workspace_dir, auto_plan,
+                    state="completed", result=result,
+                )
+                resp = self._orchestration_response(
                     goal, result.tasks, workspace_dir, auto_plan,
                     state="completed", result=result,
-                ))
+                )
+                resp["orchestration_id"] = oid
+                return JSONResponse(resp)
 
             # Background: return an id immediately; GET
             # /api/orchestrate/<id> reads live progress off the same
@@ -7541,12 +7616,24 @@ class GatewayServer:
                     job["state"] = "completed"
                 except asyncio.CancelledError:
                     job["state"] = "cancelled"
+                    self._persist_orchestration(
+                        oid, goal, job["tasks"], workspace_dir, auto_plan,
+                        state="cancelled",
+                    )
                     raise
                 except Exception as exc:
                     log.exception("background orchestration %s failed: %s", oid, exc)
                     job["state"] = "failed"
                     job["error"] = _err_str(exc)
+                self._persist_orchestration(
+                    oid, goal, job["tasks"], workspace_dir, auto_plan,
+                    state=job["state"], result=job["result"],
+                    error=job["error"],
+                )
 
+            self._persist_orchestration(
+                oid, goal, tasks, workspace_dir, auto_plan, state="running",
+            )
             job["task"] = asyncio.create_task(_drive())
             self._orchestrations[oid] = job
             # Bound the registry: evict oldest FINISHED jobs past 50.
@@ -7576,6 +7663,17 @@ class GatewayServer:
             oid = request.path_params["oid"]
             job = self._orchestrations.get(oid)
             if job is None:
+                # Fall back to persisted history — finished/interrupted
+                # runs outlive the in-memory job registry and coordinator
+                # restarts.
+                record = self._orch_history.get(oid)
+                if record is not None:
+                    if request.method == "DELETE":
+                        return JSONResponse(
+                            {"orchestration_id": oid,
+                             "state": record.get("state")},
+                        )
+                    return JSONResponse(record)
                 return JSONResponse(
                     {"error": f"unknown orchestration id {oid!r}"},
                     status_code=404,
@@ -7597,6 +7695,60 @@ class GatewayServer:
                     (time.monotonic() - job["started_at"]) * 1000.0, 1,
                 )
             return JSONResponse(resp)
+
+        async def api_orchestrations_list(request: Request) -> JSONResponse:
+            """GET /api/orchestrations — recent runs, newest first.
+
+            Combines live in-memory jobs (statuses current to the tick)
+            with persisted history (survives restarts). ``limit`` query
+            param defaults to 20, capped at 100.
+            """
+            try:
+                limit = int(request.query_params.get("limit", "20"))
+            except ValueError:
+                return JSONResponse(
+                    {"error": "limit must be an integer"}, status_code=400,
+                )
+            limit = max(1, min(limit, 100))
+
+            items: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for oid, job in self._orchestrations.items():
+                rec = self._orch_history.get(oid) or {}
+                job_tasks = job["tasks"]
+                result = job["result"]
+                items.append({
+                    "orchestration_id": oid,
+                    "goal": job["goal"][:160],
+                    "state": job["state"],
+                    "created_at": rec.get("created_at", ""),
+                    "tasks_total": len(job_tasks),
+                    "tasks_completed": sum(
+                        1 for t in job_tasks if t.status == "completed"
+                    ),
+                    "goal_achieved": (
+                        result.goal_achieved if result is not None else None
+                    ),
+                })
+                seen.add(oid)
+            for oid, rec in self._orch_history.items():
+                if oid in seen:
+                    continue
+                rec_tasks = rec.get("tasks") or []
+                items.append({
+                    "orchestration_id": oid,
+                    "goal": (rec.get("goal") or "")[:160],
+                    "state": rec.get("state"),
+                    "created_at": rec.get("created_at", ""),
+                    "tasks_total": len(rec_tasks),
+                    "tasks_completed": sum(
+                        1 for t in rec_tasks
+                        if t.get("status") == "completed"
+                    ),
+                    "goal_achieved": rec.get("goal_achieved"),
+                })
+            items.sort(key=lambda x: x["created_at"] or "", reverse=True)
+            return JSONResponse({"orchestrations": items[:limit]})
 
         async def api_sessions(request: Request) -> JSONResponse:
             """GET /api/sessions — list active and stored sessions with tags.
@@ -7771,6 +7923,11 @@ class GatewayServer:
                 "/api/orchestrate/{oid}",
                 api_orchestrate_status,
                 methods=["GET", "DELETE"],
+            ),
+            Route(
+                "/api/orchestrations",
+                api_orchestrations_list,
+                methods=["GET"],
             ),
             Route("/api/sessions", api_sessions, methods=["GET"]),
             *openai_routes,

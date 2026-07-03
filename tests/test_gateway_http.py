@@ -1,5 +1,7 @@
 """Tests for the gateway HTTP endpoints and web UI serving."""
 
+import json
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -8,6 +10,7 @@ from towel.agent.runtime import AgentRuntime
 from towel.config import TowelConfig
 from towel.gateway.server import GatewayServer
 from towel.gateway.sessions import SessionManager
+from towel.persistence.orchestrations import OrchestrationStore
 from towel.persistence.session_pins import SessionPinStore
 from towel.persistence.store import ConversationStore
 from towel.persistence.worker_state import WorkerStateStore
@@ -25,12 +28,14 @@ def gateway(store):
     sessions = SessionManager(store=store)
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
+    orch_store = OrchestrationStore(path=store.store_dir / "orchestrations.json")
     return GatewayServer(
         config=config,
         agent=agent,
         sessions=sessions,
         pin_store=pin_store,
         worker_state_store=worker_state_store,
+        orch_store=orch_store,
     )
 
 
@@ -5472,3 +5477,103 @@ class TestOrchestrateBackground:
         })
         assert resp.status_code == 400
         assert "background" in resp.json()["error"]
+
+
+class TestOrchestrationHistory:
+    """Terminal orchestrations persist to the OrchestrationStore and
+    survive gateway restarts; /api/orchestrations lists them."""
+
+    def test_sync_run_persisted_and_listed(self, gateway, client, store):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "persisted goal",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        })
+        assert resp.status_code == 200
+        oid = resp.json()["orchestration_id"]
+
+        # Listed.
+        listing = client.get("/api/orchestrations").json()["orchestrations"]
+        assert any(r["orchestration_id"] == oid for r in listing)
+        entry = next(r for r in listing if r["orchestration_id"] == oid)
+        assert entry["state"] == "completed"
+        assert entry["tasks_completed"] == 1
+
+        # Status endpoint serves it from history (no in-memory job).
+        got = client.get(f"/api/orchestrate/{oid}").json()
+        assert got["goal"] == "persisted goal"
+        assert got["state"] == "completed"
+
+        # On disk.
+        raw = json.loads(
+            (store.store_dir / "orchestrations.json").read_text()
+        )
+        assert oid in raw
+        assert raw[oid]["state"] == "completed"
+        assert raw[oid]["created_at"]
+
+    def test_running_records_marked_interrupted_on_restart(self, store):
+        from towel.persistence.orchestrations import OrchestrationStore
+        orch_store = OrchestrationStore(
+            path=store.store_dir / "orchestrations.json",
+        )
+        orch_store.save({
+            "dead1": {"goal": "g", "state": "running",
+                      "created_at": "2026-07-03T00:00:00+00:00", "tasks": []},
+        })
+        config = TowelConfig()
+        gw = GatewayServer(
+            config=config,
+            agent=AgentRuntime(config),
+            sessions=SessionManager(store=store),
+            pin_store=SessionPinStore(path=store.store_dir / "p.json"),
+            worker_state_store=WorkerStateStore(path=store.store_dir / "w.json"),
+            orch_store=orch_store,
+        )
+        assert gw._orch_history["dead1"]["state"] == "interrupted"
+        # And re-persisted.
+        raw = json.loads(
+            (store.store_dir / "orchestrations.json").read_text()
+        )
+        assert raw["dead1"]["state"] == "interrupted"
+
+    def test_history_survives_new_gateway_instance(self, gateway, client, store):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        oid = client.post("/api/orchestrate", json={
+            "goal": "restart me",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        }).json()["orchestration_id"]
+
+        # Fresh gateway sharing the same store path = simulated restart.
+        config = TowelConfig()
+        gw2 = GatewayServer(
+            config=config,
+            agent=AgentRuntime(config),
+            sessions=SessionManager(store=store),
+            pin_store=SessionPinStore(path=store.store_dir / "p2.json"),
+            worker_state_store=WorkerStateStore(path=store.store_dir / "w2.json"),
+            orch_store=OrchestrationStore(
+                path=store.store_dir / "orchestrations.json",
+            ),
+        )
+        client2 = TestClient(gw2._build_http_app())
+        got = client2.get(f"/api/orchestrate/{oid}").json()
+        assert got["state"] == "completed"
+        assert got["goal"] == "restart me"
+
+    def test_list_limit_validation(self, client):
+        resp = client.get("/api/orchestrations?limit=abc")
+        assert resp.status_code == 400

@@ -33,6 +33,11 @@ on a two-worker MLX fleet:
 - **Web UI**: the fleet panel gains an Orchestrate section — enter a
   goal, toggle verify/repair, watch per-task progress live, cancel
   mid-run. Backed by the background API.
+- **Persistent history**: every run (sync and background) is recorded
+  to `~/.towel/orchestrations.json` (newest 100 kept); records survive
+  coordinator restarts, in-flight runs get marked `interrupted`.
+  `GET /api/orchestrations` and `towel orchestrations` list recent
+  runs; `GET /api/orchestrate/<id>` serves finished runs from history.
 - **Collaboration grounding**: dependents receive a dependency's
   current on-disk file contents (not its chat blob) plus actual
   execution output.

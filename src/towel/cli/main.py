@@ -2334,6 +2334,65 @@ def orchestrate(
         _post_orchestrate(url, body, as_json)
 
 
+@cli.command()
+@click.option(
+    "--limit", default=20, type=click.IntRange(1, 100),
+    help="How many recent runs to show (default 20).",
+)
+@click.option(
+    "--json", "as_json", is_flag=True,
+    help="Print raw JSON instead of a table.",
+)
+def orchestrations(limit: int, as_json: bool) -> None:
+    """List recent orchestration runs (live and persisted history)."""
+    import json as json_mod
+
+    import httpx
+
+    config = TowelConfig.load()
+    url = (
+        f"http://{config.gateway.host}:{config.gateway.port + 1}"
+        f"/api/orchestrations?limit={limit}"
+    )
+    try:
+        resp = httpx.get(url, timeout=30)
+    except httpx.RequestError as exc:
+        console.print(f"[red]Gateway request failed:[/red] {exc}")
+        console.print("Is the gateway running? Try: towel serve")
+        sys.exit(1)
+    if resp.status_code != 200:
+        console.print(f"[red]Gateway returned {resp.status_code}:[/red] {resp.text}")
+        sys.exit(1)
+    data = resp.json()
+    if as_json:
+        console.print(json_mod.dumps(data, indent=2))
+        return
+    runs = data.get("orchestrations", [])
+    if not runs:
+        console.print("[dim]No orchestration runs recorded yet.[/dim]")
+        return
+    for r in runs:
+        state = r.get("state", "?")
+        color = {
+            "completed": "green", "running": "cyan",
+            "failed": "red", "cancelled": "yellow",
+            "interrupted": "yellow",
+        }.get(state, "white")
+        audit = r.get("goal_achieved")
+        audit_note = (
+            " [green]goal✓[/green]" if audit is True
+            else " [red]goal✗[/red]" if audit is False else ""
+        )
+        console.print(
+            f"[{color}]{state:<11}[/{color}] "
+            f"{r.get('tasks_completed', 0)}/{r.get('tasks_total', 0)}"
+            f"{audit_note} "
+            f"[dim]{r.get('created_at', '')}[/dim] "
+            f"{r.get('orchestration_id', '')}  "
+            f"{(r.get('goal') or '')[:70]}"
+        )
+
+
 def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
     """Submit the orchestration in background mode and render live
     progress from GET /api/orchestrate/<id> until it finishes."""
