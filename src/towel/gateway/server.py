@@ -2822,6 +2822,21 @@ class GatewayServer:
             "tools": needs_tools,
         }
 
+    def available_worker_count(self) -> int:
+        """How many workers can accept orchestrator subtasks right now.
+
+        Counts enabled, non-draining connected workers — busy ones
+        included, since they free up within a subtask's lifetime. The
+        orchestrator sizes its parallel-dispatch semaphore from this so
+        it saturates the fleet without over-subscribing it (dispatching
+        more concurrent subtasks than workers just converts the excess
+        into no-worker-available retry failures).
+        """
+        return sum(
+            1 for w in self._workers.list()
+            if w.enabled and not w.draining
+        )
+
     async def _cancel_remote_job(self, session_id: str) -> None:
         job_id = self._session_jobs.get(session_id)
         worker_id = self._session_workers.get(session_id)
@@ -7154,7 +7169,9 @@ class GatewayServer:
                     },
                     ...
                   ],
-                  "parallel": false,      // optional, run independent tasks together
+                  "parallel": true,       // default true: dependency-aware
+                                          // readiness scheduling across the fleet;
+                                          // false serializes in list order
                   "verify": false,        // optional, default verify for every task
                   "goal_check": false,    // optional, audit the outcome vs the goal
                   "repair": false         // optional (implies goal_check): one
@@ -7333,7 +7350,12 @@ class GatewayServer:
                     run_check=run_check_raw,
                 ))
 
-            parallel = bool(body.get("parallel", False))
+            # Parallel by default: depends_on is honored either way
+            # (readiness scheduling), so sequential mode's only effect
+            # is serializing independent tasks — which wastes an idle
+            # fleet. Callers whose plans rely on implicit list order
+            # instead of explicit depends_on can pass false.
+            parallel = bool(body.get("parallel", True))
 
             workspace_dir_raw = body.get("workspace_dir")
             workspace_dir: str | None = None

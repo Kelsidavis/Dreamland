@@ -2170,8 +2170,12 @@ def ask(
     help="Shared workspace directory for the subtasks.",
 )
 @click.option(
-    "--parallel", is_flag=True,
-    help="Run independent subtasks in parallel.",
+    "--parallel/--sequential", "parallel", default=None,
+    help=(
+        "Scheduling mode. Default: parallel (dependency-aware "
+        "readiness scheduling across the fleet). --sequential runs "
+        "tasks one at a time in list order."
+    ),
 )
 @click.option(
     "--max-attempts", "max_attempts", default=2, type=click.IntRange(1, 5),
@@ -2234,8 +2238,8 @@ def orchestrate(
             body["goal"] = goal
         if workspace_dir is not None:
             body["workspace_dir"] = workspace_dir
-        if parallel:
-            body["parallel"] = True
+        if parallel is not None:
+            body["parallel"] = parallel
         if max_attempts != 2:
             body["max_attempts"] = max_attempts
         if verify:
@@ -2253,9 +2257,10 @@ def orchestrate(
             # auto-plan the subtask list with an architect worker.
             body = {
                 "goal": goal,
-                "parallel": parallel,
                 "max_attempts": max_attempts,
             }
+            if parallel is not None:
+                body["parallel"] = parallel
             if verify:
                 body["verify"] = True
             if goal_check:
@@ -2299,9 +2304,10 @@ def orchestrate(
         body = {
             "goal": goal,
             "tasks": parsed_tasks,
-            "parallel": parallel,
             "max_attempts": max_attempts,
         }
+        if parallel is not None:
+            body["parallel"] = parallel
         if verify:
             body["verify"] = True
         if goal_check:

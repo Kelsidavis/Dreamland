@@ -1413,3 +1413,156 @@ class TestGoalCheckAndRepair:
         # The repair coder saw the file it was rewriting.
         assert "MARKER_ORIGINAL_HELLO" in dispatcher.coder_prompts[-1]
         assert "Current contents of app.py" in dispatcher.coder_prompts[-1]
+
+
+class TestReadinessScheduling:
+    """run_parallel launches a task the moment its deps complete —
+    no wave barrier — and throttles concurrency to fleet capacity."""
+
+    def test_dependent_starts_before_slow_sibling_finishes(self):
+        """A(slow) and B(fast) are independent; C depends on B. Under
+        wave scheduling C waited for A; readiness scheduling starts C
+        as soon as B completes, while A is still running."""
+        import time as _time
+
+        from towel.config import TowelConfig
+
+        class _Timeline:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, float]] = []
+                self.a_done_at: float | None = None
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if "slow task A" in prompt:
+                    await asyncio.sleep(0.2)
+                    self.a_done_at = _time.monotonic()
+                    return "A done"
+                if "fast task B" in prompt:
+                    await asyncio.sleep(0.01)
+                    return "B done"
+                # C — record when it started relative to A finishing.
+                self.events.append(("C-started", _time.monotonic()))
+                return "C done"
+
+        dispatcher = _Timeline()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="slow task A"),
+            AgentTask(role="coder", prompt="fast task B"),
+            AgentTask(role="reviewer", prompt="review B output", depends_on=[1]),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        c_started = dispatcher.events[0][1]
+        assert dispatcher.a_done_at is not None
+        # C must have STARTED before A finished — pipelined, not
+        # wave-barriered.
+        assert c_started < dispatcher.a_done_at
+
+    def test_concurrency_throttled_to_fleet_size(self):
+        from towel.config import TowelConfig
+
+        class _OneWorker:
+            def __init__(self) -> None:
+                self.in_flight = 0
+                self.max_in_flight = 0
+
+            def available_worker_count(self) -> int:
+                return 1
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+                await asyncio.sleep(0.01)
+                self.in_flight -= 1
+                return "ok"
+
+        dispatcher = _OneWorker()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt=f"t{i}") for i in range(4)]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        # Never more in flight than the fleet has workers.
+        assert dispatcher.max_in_flight == 1
+
+    def test_fleet_size_saturated_not_exceeded(self):
+        from towel.config import TowelConfig
+
+        class _TwoWorkers:
+            def __init__(self) -> None:
+                self.in_flight = 0
+                self.max_in_flight = 0
+
+            def available_worker_count(self) -> int:
+                return 2
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+                await asyncio.sleep(0.02)
+                self.in_flight -= 1
+                return "ok"
+
+        dispatcher = _TwoWorkers()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt=f"t{i}") for i in range(5)]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        # Both workers used, never oversubscribed.
+        assert dispatcher.max_in_flight == 2
+
+    def test_planner_hint_mentions_concurrency_on_multi_worker_fleet(self):
+        from towel.config import TowelConfig
+
+        class _BigFleet:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                return '[{"role": "coder", "prompt": "x"}]'
+
+        dispatcher = _BigFleet()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        asyncio.run(orch.plan("g"))
+        assert "3 tasks CONCURRENTLY" in dispatcher.prompts[0]
+
+    def test_planner_hint_absent_on_single_worker(self):
+        from towel.config import TowelConfig
+
+        class _Solo:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            def available_worker_count(self) -> int:
+                return 1
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                return '[{"role": "coder", "prompt": "x"}]'
+
+        dispatcher = _Solo()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        asyncio.run(orch.plan("g"))
+        assert "CONCURRENTLY" not in dispatcher.prompts[0]

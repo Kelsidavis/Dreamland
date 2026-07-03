@@ -414,6 +414,9 @@ class TestOrchestrateEndpoint:
             return f"{role}-done"
 
         gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        # The scheduler throttles to the fleet's worker count; the test
+        # registry has no workers, so claim capacity for three.
+        gateway.available_worker_count = lambda: 3  # type: ignore[method-assign]
 
         resp = client.post("/api/orchestrate", json={
             "goal": "build three",

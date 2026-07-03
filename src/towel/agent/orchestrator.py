@@ -376,7 +376,14 @@ class Orchestrator:
                     task.role, attempt + 1, self.max_attempts,
                     e.worker_id or "no-worker", e,
                 )
-                await asyncio.sleep(0)
+                if e.worker_id is None:
+                    # No worker was even picked — the fleet is
+                    # saturated or briefly empty (mid-reconnect). An
+                    # immediate retry hits the same wall; a short real
+                    # wait lets a worker finish its job or re-register.
+                    await asyncio.sleep(2.0)
+                else:
+                    await asyncio.sleep(0)
             except Exception as e:
                 last_exc = e
                 log.warning(
@@ -729,8 +736,7 @@ class Orchestrator:
         )
         return await self._plan_loop(base_prompt, label=goal[:60], verify=verify)
 
-    @staticmethod
-    def _plan_schema_guide() -> str:
+    def _plan_schema_guide(self) -> str:
         """The JSON schema + rules block shared by every planning
         prompt (initial decomposition and repair planning)."""
         # "planner" is the internal role plan() itself dispatches as —
@@ -780,6 +786,23 @@ class Orchestrator:
             "- Only set extract_to on a task whose entire output is "
             "that one file's contents.\n"
             "- Prefer a few substantial tasks over many small ones."
+            + self._parallelism_hint()
+        )
+
+    def _parallelism_hint(self) -> str:
+        """Extra planning rule when the fleet can actually run tasks
+        concurrently: chains waste workers. Skipped on a single-worker
+        fleet where it would just add prompt tokens."""
+        slots = self._concurrency_slots()
+        if slots < 2:
+            return ""
+        return (
+            f"\n- The fleet runs up to {slots} tasks CONCURRENTLY. "
+            "Tasks without depends_on start immediately in parallel. "
+            "Only add depends_on when a task genuinely needs another "
+            "task's output — do not chain independent work (e.g. two "
+            "unrelated files can be written simultaneously by two "
+            "tasks with no depends_on)."
         )
 
     async def _plan_loop(
@@ -1014,6 +1037,24 @@ class Orchestrator:
         self._synthesize(goal, result)
         return result
 
+    def _concurrency_slots(self) -> int:
+        """How many subtasks to dispatch concurrently.
+
+        Sized from the dispatcher's live worker count when it exposes
+        one (the gateway does) — dispatching more concurrent subtasks
+        than the fleet has workers converts the excess into
+        no-worker-available retry failures instead of throughput.
+        Falls back to a modest constant for dispatchers without the
+        accessor (tests, custom integrations).
+        """
+        counter = getattr(self.dispatcher, "available_worker_count", None)
+        if callable(counter):
+            try:
+                return max(1, int(counter()))
+            except Exception:
+                return 4
+        return 4
+
     async def run_parallel(
         self,
         goal: str,
@@ -1021,47 +1062,57 @@ class Orchestrator:
         *,
         workspace_dir: str | None = None,
     ) -> OrchestratorResult:
-        """Execute tasks in dependency-aware parallel waves.
+        """Execute tasks with dependency-aware readiness scheduling.
 
-        Each wave runs every still-pending task whose dependencies have
-        all completed — independent tasks fan out across the fleet
-        simultaneously while dependents wait for their inputs and get
-        the same dependency-context injection the sequential path does.
-        Previously this method ignored `depends_on` entirely, so
-        `parallel=true` silently broke collaboration: dependents raced
-        their dependencies and saw none of their output.
+        Every task launches the moment its dependencies complete — no
+        wave barrier, so a slow branch never blocks an unrelated ready
+        task (previously tasks were gathered in waves and the whole
+        wave waited on its slowest member). Dependents get the same
+        dependency-context injection the sequential path does.
+
+        Concurrency is throttled to the fleet's worker count (see
+        `_concurrency_slots`): ready tasks beyond that queue on the
+        semaphore instead of dispatching into a saturated fleet and
+        burning their retries on no-worker-available errors.
 
         Tasks whose dependencies failed are skipped (same cascade as
-        `run`). Tasks left pending when no wave can make progress —
-        only possible with a dependency cycle — are skipped too, with
-        the cycle called out in the result.
+        `run`). Tasks left pending when nothing is running and nothing
+        can launch — only possible with a dependency cycle — are
+        skipped with the cycle called out in the result.
         """
         start = time.perf_counter()
         result = OrchestratorResult(tasks=tasks)
         workspace_preamble = self._workspace_preamble(workspace_dir)
 
+        slots = self._concurrency_slots()
         log.info(
-            f"Orchestrating {len(tasks)} tasks (parallel waves) for: {goal[:80]}"
+            "Orchestrating %d tasks (parallel, %d slots) for: %s",
+            len(tasks), slots, goal[:80],
         )
+        sem = asyncio.Semaphore(slots)
 
         async def _exec(i: int, task: AgentTask) -> None:
-            full_prompt = self._compose_prompt(
-                goal, task, tasks, workspace_preamble,
-            )
-            await self._execute_with_retry(
-                task, full_prompt, workspace_dir=workspace_dir,
-            )
+            async with sem:
+                # Compose inside the slot: dependencies are complete at
+                # launch time, so their results are final here.
+                full_prompt = self._compose_prompt(
+                    goal, task, tasks, workspace_preamble,
+                )
+                await self._execute_with_retry(
+                    task, full_prompt, workspace_dir=workspace_dir,
+                )
             log.info(
                 "Task %d (%s): %s in %.1fs (attempts=%d)",
                 i, task.role, task.status, task.elapsed, task.attempts,
             )
 
-        wave = 0
+        launched: set[int] = set()
+        running: set[asyncio.Task[None]] = set()
         while True:
-            # Cascade skips first so a wave never launches a task whose
-            # dependency just failed in the previous wave.
+            # Cascade skips first so we never launch a task whose
+            # dependency just failed.
             for i, task in enumerate(tasks):
-                if task.status != "pending":
+                if task.status != "pending" or i in launched:
                     continue
                 failed_deps = self._failed_deps(task, tasks)
                 if failed_deps:
@@ -1070,21 +1121,24 @@ class Orchestrator:
                         "Task %d (%s): skipped (failed deps %s)",
                         i, task.role, failed_deps,
                     )
-
-            ready = [
-                i for i, task in enumerate(tasks)
-                if task.status == "pending"
-                and all(
+                    continue
+                if all(
                     tasks[d].status == "completed"
                     for d in task.depends_on
                     if 0 <= d < len(tasks)
-                )
-            ]
-            if not ready:
+                ):
+                    launched.add(i)
+                    running.add(asyncio.create_task(_exec(i, task)))
+
+            if not running:
                 break
-            wave += 1
-            log.info("Parallel wave %d: tasks %s", wave, ready)
-            await asyncio.gather(*[_exec(i, tasks[i]) for i in ready])
+            done, running = await asyncio.wait(
+                running, return_when=asyncio.FIRST_COMPLETED,
+            )
+            for finished in done:
+                # Task failures are captured in AgentTask.status; an
+                # exception here is an orchestrator bug — propagate.
+                finished.result()
 
         # Anything still pending here has an unresolvable dependency
         # graph (a cycle) — surface that instead of looping forever.
