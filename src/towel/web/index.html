@@ -480,6 +480,26 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
           <div id="orch-status" style="font-family:var(--mono);font-size:11px;
                                        color:var(--text-dim);margin-bottom:8px"></div>
           <div class="fleet-list" id="orch-tasks"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+            <select id="orch-history-select"
+                    style="flex:1;min-width:160px;background:var(--bg-input);
+                           color:var(--text);border:1px solid var(--border);
+                           border-radius:4px;padding:5px 6px;
+                           font-family:var(--mono);font-size:0.75em">
+              <option value="">— current / pick a past run —</option>
+            </select>
+            <button class="tb-btn" id="orch-files-btn"
+                    title="Browse the project files this run produced">files</button>
+          </div>
+          <div class="fleet-list" id="orch-files-list" style="margin-top:8px"></div>
+          <div id="orch-file-head" style="display:none;font-family:var(--mono);
+               font-size:11px;color:var(--cyan);margin-top:8px"></div>
+          <pre id="orch-file-view"
+               style="display:none;background:var(--bg-input);
+                      border:1px solid var(--border);border-radius:8px;
+                      padding:10px;margin-top:4px;max-height:320px;
+                      overflow:auto;font-family:var(--mono);font-size:11px;
+                      color:var(--text);white-space:pre"></pre>
         </div>
         <div class="fleet-section">
           <h3>Routes</h3>
@@ -1230,6 +1250,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   function openFleetPanel() {
     fleetOverlay.classList.add('visible');
     loadFleetState();
+    orchHistoryRefresh();
     if (fleetRefreshTimer === null) {
       fleetRefreshTimer = setInterval(function() {
         if (fleetOverlay.classList.contains('visible')) {
@@ -1351,6 +1372,85 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     await apiDelete('/api/orchestrate/' + encodeURIComponent(orchId));
     await orchPoll();
     orchStop();
+  }
+
+  // ---- File explorer / project code viewer ---------------------------
+  // Browses the workspace an orchestration produced, via
+  // /api/orchestrate/<id>/files — the same endpoints external systems
+  // use to pull build artifacts.
+  async function orchHistoryRefresh() {
+    const sel = document.getElementById('orch-history-select');
+    try {
+      const data = await apiGet('/api/orchestrations?limit=20');
+      const runs = data.orchestrations || [];
+      const current = sel.value;
+      sel.innerHTML = '<option value="">— current / pick a past run —</option>' +
+        runs.map(function(r) {
+          return '<option value="' + orchEsc(r.orchestration_id) + '">' +
+            orchEsc((r.state || '?') + ' · ' + (r.goal || '').slice(0, 60)) +
+            '</option>';
+        }).join('');
+      sel.value = current;
+    } catch (e) { /* panel still usable without history */ }
+  }
+
+  function orchFileTargetId() {
+    return document.getElementById('orch-history-select').value || orchId;
+  }
+
+  async function orchFilesLoad() {
+    const id = orchFileTargetId();
+    const listEl = document.getElementById('orch-files-list');
+    if (!id) { listEl.innerHTML =
+      '<div style="font-size:11px;color:var(--text-dim)">No run selected — ' +
+      'start an orchestration or pick a past run.</div>'; return; }
+    const data = await apiGet('/api/orchestrate/' + encodeURIComponent(id) + '/files');
+    if (data.error) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--red)">' +
+        orchEsc(data.error) + '</div>';
+      return;
+    }
+    const files = data.files || [];
+    if (!files.length) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim)">' +
+        'Workspace is empty.</div>';
+      return;
+    }
+    listEl.innerHTML = files.map(function(f) {
+      const kb = f.size >= 1024 ? (f.size / 1024).toFixed(1) + 'K' : f.size + 'B';
+      return '<div class="fleet-card orch-file-row" data-path="' +
+        orchEsc(f.path) + '" style="padding:6px 10px;cursor:pointer;' +
+        'display:flex;justify-content:space-between;font-family:var(--mono);' +
+        'font-size:11px"><span>📄 ' + orchEsc(f.path) + '</span>' +
+        '<span style="color:var(--text-dim)">' + kb + '</span></div>';
+    }).join('');
+    listEl.querySelectorAll('.orch-file-row').forEach(function(row) {
+      row.addEventListener('click', function() {
+        orchFileView(id, row.dataset.path);
+      });
+    });
+  }
+
+  async function orchFileView(id, path) {
+    const headEl = document.getElementById('orch-file-head');
+    const viewEl = document.getElementById('orch-file-view');
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const url = apiBase + '/api/orchestrate/' + encodeURIComponent(id) +
+      '/files/' + encoded;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      headEl.style.display = '';
+      headEl.textContent = path + ' — failed to load (' + resp.status + ')';
+      viewEl.style.display = 'none';
+      return;
+    }
+    const text = await resp.text();
+    headEl.style.display = '';
+    headEl.innerHTML = orchEsc(path) +
+      ' <a href="' + url + '" target="_blank" ' +
+      'style="color:var(--text-dim)">[raw]</a>';
+    viewEl.style.display = '';
+    viewEl.textContent = text;
   }
 
   async function updateWorkerState(workerId, payload) {
@@ -2302,6 +2402,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   fleetCloseBtn.addEventListener('click',closeFleetPanel);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
+  document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
 
   // ── Memory panel ──────────────────────────────────────────────────
   const memoryOverlay = document.getElementById('memory-overlay');

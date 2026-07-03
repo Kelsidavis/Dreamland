@@ -266,6 +266,11 @@ towel orchestrate \
 - **Background runs** — `--watch` streams live progress; via the API,
   `POST /api/orchestrate {"background": true}` returns an id and
   `GET/DELETE /api/orchestrate/<id>` polls or cancels.
+- **Pull the artifacts** — `GET /api/orchestrate/<id>/files` lists the
+  project files a run produced; `GET /api/orchestrate/<id>/files/<path>`
+  serves raw contents (traversal-guarded, scoped to the run's recorded
+  workspace). The fleet panel includes a file explorer / code viewer
+  over the same endpoints.
 
 Hand-authored plans still work: `towel orchestrate plan.json` or
 repeated `--task "role:prompt@deps+tools"` specs.

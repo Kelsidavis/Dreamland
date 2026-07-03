@@ -7750,6 +7750,119 @@ class GatewayServer:
             items.sort(key=lambda x: x["created_at"] or "", reverse=True)
             return JSONResponse({"orchestrations": items[:limit]})
 
+        def _orch_workspace(oid: str) -> str | None:
+            """Workspace directory for an orchestration id, from the
+            live job registry or persisted history."""
+            job = self._orchestrations.get(oid)
+            if job is not None:
+                return job.get("workspace_dir")
+            record = self._orch_history.get(oid)
+            if record is not None:
+                return record.get("workspace_dir")
+            return None
+
+        async def api_orchestrate_files(request: Request) -> JSONResponse:
+            """GET /api/orchestrate/<id>/files — list the project files
+            an orchestration produced.
+
+            File access is scoped to workspaces the coordinator itself
+            recorded for known orchestration ids — callers never supply
+            a filesystem path, so this cannot be used to browse
+            arbitrary directories. Hidden files/dirs are skipped.
+            """
+            oid = request.path_params["oid"]
+            workspace = _orch_workspace(oid)
+            if workspace is None:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r}"},
+                    status_code=404,
+                )
+            if not workspace:
+                return JSONResponse(
+                    {"error": "orchestration has no workspace_dir"},
+                    status_code=404,
+                )
+            from pathlib import Path as _Path
+            root = _Path(workspace)
+            if not root.is_dir():
+                return JSONResponse(
+                    {"error": f"workspace {workspace} no longer exists"},
+                    status_code=404,
+                )
+            files = []
+            truncated = False
+            for p in sorted(root.rglob("*")):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(root)
+                if any(
+                    part.startswith(".") or part == "__pycache__"
+                    for part in rel.parts
+                ):
+                    continue
+                if len(files) >= 1000:
+                    truncated = True
+                    break
+                stat = p.stat()
+                files.append({
+                    "path": str(rel),
+                    "size": stat.st_size,
+                })
+            return JSONResponse({
+                "orchestration_id": oid,
+                "workspace_dir": workspace,
+                "files": files,
+                "truncated": truncated,
+            })
+
+        async def api_orchestrate_file(request: Request):
+            """GET /api/orchestrate/<id>/files/<path> — raw contents of
+            one produced file, for the web viewer and for external
+            systems pulling build artifacts.
+
+            The path must resolve inside the orchestration's recorded
+            workspace; hidden segments (including '..') are rejected
+            outright.
+            """
+            oid = request.path_params["oid"]
+            rel_path = request.path_params["path"]
+            workspace = _orch_workspace(oid)
+            if workspace is None or not workspace:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r} or no workspace"},
+                    status_code=404,
+                )
+            from pathlib import Path as _Path
+            root = _Path(workspace).resolve()
+            parts = _Path(rel_path).parts
+            if any(part.startswith(".") for part in parts):
+                return JSONResponse(
+                    {"error": "path segments may not start with '.'"},
+                    status_code=400,
+                )
+            target = (root / rel_path).resolve()
+            if root not in target.parents:
+                return JSONResponse(
+                    {"error": "path resolves outside the workspace"},
+                    status_code=400,
+                )
+            if not target.is_file():
+                return JSONResponse(
+                    {"error": f"no such file: {rel_path}"}, status_code=404,
+                )
+            # Workspaces hold build artifacts, not datasets — refuse to
+            # stream anything implausibly large.
+            if target.stat().st_size > 50 * 1024 * 1024:
+                return JSONResponse(
+                    {"error": "file exceeds the 50MB serving cap"},
+                    status_code=413,
+                )
+            import mimetypes
+            media_type = (
+                mimetypes.guess_type(target.name)[0] or "text/plain"
+            )
+            return FileResponse(str(target), media_type=media_type)
+
         async def api_sessions(request: Request) -> JSONResponse:
             """GET /api/sessions — list active and stored sessions with tags.
 
@@ -7923,6 +8036,16 @@ class GatewayServer:
                 "/api/orchestrate/{oid}",
                 api_orchestrate_status,
                 methods=["GET", "DELETE"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/files",
+                api_orchestrate_files,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/files/{path:path}",
+                api_orchestrate_file,
+                methods=["GET"],
             ),
             Route(
                 "/api/orchestrations",

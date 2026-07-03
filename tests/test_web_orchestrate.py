@@ -37,3 +37,24 @@ class TestOrchestratePanel:
         # Task results/run_output are model-generated text rendered
         # into innerHTML — they must pass through the escaper.
         assert "orchEsc" in HTML
+
+
+class TestFileExplorer:
+    def test_explorer_elements_exist(self):
+        for element_id in (
+            "orch-history-select",
+            "orch-files-btn",
+            "orch-files-list",
+            "orch-file-view",
+            "orch-file-head",
+        ):
+            assert element_id in HTML, f"missing #{element_id}"
+
+    def test_uses_files_api(self):
+        assert "/files" in HTML
+        assert "orchFilesLoad" in HTML
+        assert "orchFileView" in HTML
+
+    def test_file_paths_escaped_and_encoded(self):
+        # Paths come from disk and land in innerHTML + URLs.
+        assert "encodeURIComponent" in HTML

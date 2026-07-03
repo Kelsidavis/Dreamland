@@ -38,6 +38,12 @@ on a two-worker MLX fleet:
   coordinator restarts, in-flight runs get marked `interrupted`.
   `GET /api/orchestrations` and `towel orchestrations` list recent
   runs; `GET /api/orchestrate/<id>` serves finished runs from history.
+- **File explorer / artifact pulling**: `GET /api/orchestrate/<id>/files`
+  lists a run's project files, `…/files/<path>` serves raw contents —
+  scoped to coordinator-recorded workspaces with traversal guards, so
+  external systems can pull build artifacts. The fleet panel's
+  Orchestrate section gains a file browser + code viewer over the same
+  endpoints, with a recent-runs picker.
 - **Collaboration grounding**: dependents receive a dependency's
   current on-disk file contents (not its chat blob) plus actual
   execution output.

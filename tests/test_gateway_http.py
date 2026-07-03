@@ -5577,3 +5577,87 @@ class TestOrchestrationHistory:
     def test_list_limit_validation(self, client):
         resp = client.get("/api/orchestrations?limit=abc")
         assert resp.status_code == 400
+
+
+class TestOrchestrateFiles:
+    """File explorer endpoints: list and fetch project files from an
+    orchestration's recorded workspace — the pull surface for external
+    systems. Paths are always resolved against coordinator-recorded
+    workspaces, never caller-supplied roots."""
+
+    def _run_orchestration(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('artifact')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "ws"),
+            "tasks": [{
+                "role": "coder", "prompt": "write it",
+                "extract_to": "pkg/app.py",
+            }],
+        })
+        assert resp.status_code == 200
+        return resp.json()["orchestration_id"]
+
+    def test_list_and_fetch(self, gateway, client, tmp_path):
+        oid = self._run_orchestration(gateway, client, tmp_path)
+        # Extra files: one visible, one hidden (must be skipped).
+        (tmp_path / "ws" / "README.md").write_text("# proj\n")
+        (tmp_path / "ws" / ".secret").write_text("hidden")
+
+        (tmp_path / "ws" / "__pycache__").mkdir()
+        (tmp_path / "ws" / "__pycache__" / "app.cpython-314.pyc").write_bytes(b"x")
+
+        listing = client.get(f"/api/orchestrate/{oid}/files").json()
+        paths = [f["path"] for f in listing["files"]]
+        assert "pkg/app.py" in paths
+        assert "README.md" in paths
+        assert ".secret" not in paths
+        # Bytecode noise is excluded from the code-viewer listing.
+        assert not any("__pycache__" in p for p in paths)
+        assert listing["truncated"] is False
+
+        got = client.get(f"/api/orchestrate/{oid}/files/pkg/app.py")
+        assert got.status_code == 200
+        assert got.text == "print('artifact')\n"
+
+    def test_traversal_rejected(self, gateway, client, tmp_path):
+        oid = self._run_orchestration(gateway, client, tmp_path)
+        resp = client.get(f"/api/orchestrate/{oid}/files/../outside.txt")
+        assert resp.status_code in (400, 404)
+        resp = client.get(f"/api/orchestrate/{oid}/files/.hidden")
+        assert resp.status_code == 400
+
+    def test_unknown_id_404(self, client):
+        assert client.get("/api/orchestrate/nope/files").status_code == 404
+        assert client.get("/api/orchestrate/nope/files/x.py").status_code == 404
+
+    def test_missing_file_404(self, gateway, client, tmp_path):
+        oid = self._run_orchestration(gateway, client, tmp_path)
+        assert client.get(
+            f"/api/orchestrate/{oid}/files/absent.py"
+        ).status_code == 404
+
+    def test_files_survive_restart_via_history(self, gateway, client, tmp_path, store):
+        """External systems pull artifacts after the run — the file
+        endpoints must work from persisted history too."""
+        oid = self._run_orchestration(gateway, client, tmp_path)
+        gw2 = GatewayServer(
+            config=TowelConfig(),
+            agent=AgentRuntime(TowelConfig()),
+            sessions=SessionManager(store=store),
+            pin_store=SessionPinStore(path=store.store_dir / "p3.json"),
+            worker_state_store=WorkerStateStore(path=store.store_dir / "w3.json"),
+            orch_store=OrchestrationStore(
+                path=store.store_dir / "orchestrations.json",
+            ),
+        )
+        client2 = TestClient(gw2._build_http_app())
+        got = client2.get(f"/api/orchestrate/{oid}/files/pkg/app.py")
+        assert got.status_code == 200
+        assert got.text == "print('artifact')\n"
