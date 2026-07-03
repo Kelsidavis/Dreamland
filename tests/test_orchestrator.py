@@ -318,21 +318,51 @@ class TestOrchestratorWithDispatcher:
         # Final error message reflects the last failure.
         assert "fail #3" in tasks[0].result
 
-    def test_workspace_dir_injected_into_prompts(self):
-        """When workspace_dir is set, every subtask must see a
-        workspace directive — that's how a `coder` subtask knows where
-        to write so the next subtask can read from the same place."""
+    def test_workspace_preamble_matches_task_capabilities(self):
+        """The workspace directive must match what the task can DO:
+        tool-loop tasks get the filesystem-tools instruction; chat-fast
+        extract_to tasks are told their code block is saved for them
+        (telling them to call write_file primed exactly that garbage —
+        live runs produced files of path-handling scaffolding); plain
+        text tasks get no workspace text at all."""
         from towel.config import TowelConfig
-        dispatcher = _RecordingDispatcher()
+
+        class _Caps:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.calls.append({"prompt": prompt})
+                if "write lib.py" in prompt:
+                    return "```python\nX = 1\n```"
+                return "ok"
+
+        dispatcher = _Caps()
         orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
         tasks = [
-            AgentTask(role="coder", prompt="write game.py"),
-            AgentTask(role="tester", prompt="read game.py and add tests"),
+            AgentTask(role="coder", prompt="write game.py", with_tools=True),
+            AgentTask(role="coder", prompt="write lib.py", extract_to="lib.py"),
+            AgentTask(role="writer", prompt="summarize the design"),
         ]
-        asyncio.run(orch.run("g", tasks, workspace_dir="/tmp/orch-test"))
-        for call in dispatcher.calls:
-            assert "/tmp/orch-test" in call["prompt"]
-            assert "Shared workspace" in call["prompt"]
+        import tempfile
+        with tempfile.TemporaryDirectory() as ws:
+            result = asyncio.run(orch.run("g", tasks, workspace_dir=ws))
+        assert result.success
+        # Substitute the tmp dir into the assertions below.
+        orch_test_dir = ws
+        tools_prompt = dispatcher.calls[0]["prompt"]
+        assert "Shared workspace" in tools_prompt
+        assert orch_test_dir in tools_prompt
+        assert "write_file" in tools_prompt
+        extract_prompt = dispatcher.calls[1]["prompt"]
+        assert "saved automatically as lib.py" in extract_prompt
+        assert "write_file" not in extract_prompt
+        assert "ONE fenced code block" in extract_prompt
+        plain_prompt = dispatcher.calls[2]["prompt"]
+        assert "workspace" not in plain_prompt.lower()
 
     def test_workspace_dir_absent_no_preamble(self):
         from towel.config import TowelConfig
@@ -347,8 +377,8 @@ class TestOrchestratorWithDispatcher:
         dispatcher = _RecordingDispatcher()
         orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
         tasks = [
-            AgentTask(role="coder", prompt="file a"),
-            AgentTask(role="coder", prompt="file b"),
+            AgentTask(role="coder", prompt="file a", with_tools=True),
+            AgentTask(role="coder", prompt="file b", with_tools=True),
         ]
         asyncio.run(
             orch.run_parallel("g", tasks, workspace_dir="/tmp/orch-par"),

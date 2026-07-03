@@ -35,7 +35,7 @@ from towel.agent.runtime import (
     tool_result_is_error,
 )
 from towel.agent.tool_parser import parse_tool_calls
-from towel.config import TowelConfig
+from towel.config import TOWEL_HOME, TowelConfig
 from towel.gateway.context_sync import ContextSyncManager
 from towel.gateway.dispatcher import REASON_NO_WORKERS, Dispatcher
 from towel.gateway.handoff import HandoffManager, HandoffReason
@@ -204,6 +204,13 @@ class GatewayServer:
     pin_store: SessionPinStore = field(default_factory=SessionPinStore)
     worker_state_store: WorkerStateStore = field(default_factory=WorkerStateStore)
     orch_store: OrchestrationStore = field(default_factory=OrchestrationStore)
+    # Root for managed per-orchestration workspaces, used when a caller
+    # doesn't supply workspace_dir. Without a workspace, extract_to
+    # tasks silently never write files — an external system POSTing a
+    # bare goal would get "completed" with nothing pullable.
+    workspace_root: Path = field(
+        default_factory=lambda: TOWEL_HOME / "workspaces"
+    )
     _ws_server: Server | None = None
     _connections: dict[str, ServerConnection] = field(default_factory=dict)
     _active_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
@@ -2897,6 +2904,13 @@ class GatewayServer:
                 for t in tasks
             ],
         }
+
+    def _managed_workspace(self, oid: str) -> str:
+        """Create (if needed) and return the managed workspace for an
+        orchestration that didn't bring its own workspace_dir."""
+        p = self.workspace_root / oid
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p.resolve())
 
     def _persist_orchestration(
         self,
@@ -7535,6 +7549,8 @@ class GatewayServer:
 
             if not background:
                 oid = uuid.uuid4().hex[:12]
+                if workspace_dir is None:
+                    workspace_dir = self._managed_workspace(oid)
                 if auto_plan:
                     try:
                         tasks = await orch.plan(goal, verify=verify_all_raw)
@@ -7588,6 +7604,8 @@ class GatewayServer:
             # /api/orchestrate/<id> reads live progress off the same
             # AgentTask list the run mutates.
             oid = uuid.uuid4().hex[:12]
+            if workspace_dir is None:
+                workspace_dir = self._managed_workspace(oid)
             job: dict[str, Any] = {
                 "goal": goal,
                 "tasks": tasks,           # empty until auto-plan finishes

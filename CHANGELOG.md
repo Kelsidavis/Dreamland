@@ -38,6 +38,15 @@ on a two-worker MLX fleet:
   coordinator restarts, in-flight runs get marked `interrupted`.
   `GET /api/orchestrations` and `towel orchestrations` list recent
   runs; `GET /api/orchestrate/<id>` serves finished runs from history.
+- **Managed workspaces**: omitting `workspace_dir` now provisions
+  `~/.towel/workspaces/<id>` automatically — previously extract_to
+  files were silently never written, so a bare goal produced a
+  "completed" run with nothing pullable.
+- **Capability-matched workspace directive**: chat-fast extract_to
+  tasks are told their code block is saved for them; only tool-loop
+  tasks are told to call write_file. The old one-size directive primed
+  no-tools workers to emit filesystem scaffolding instead of the
+  requested code (observed live twice).
 - **File explorer / artifact pulling**: `GET /api/orchestrate/<id>/files`
   lists a run's project files, `…/files/<path>` serves raw contents —
   scoped to coordinator-recorded workspaces with traversal guards, so

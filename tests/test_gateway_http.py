@@ -36,6 +36,7 @@ def gateway(store):
         pin_store=pin_store,
         worker_state_store=worker_state_store,
         orch_store=orch_store,
+        workspace_root=store.store_dir / "workspaces",
     )
 
 
@@ -273,7 +274,11 @@ class TestOrchestrateEndpoint:
         assert not target.exists()
         resp = client.post("/api/orchestrate", json={
             "goal": "build",
-            "tasks": [{"role": "coder", "prompt": "make x"}],
+            # with_tools: the workspace directive (with the absolute
+            # path) only goes to tasks that can actually touch the
+            # filesystem — chat-fast tasks get capability-appropriate
+            # text instead.
+            "tasks": [{"role": "coder", "prompt": "make x", "with_tools": True}],
             "workspace_dir": str(target),
         })
         assert resp.status_code == 200
@@ -5661,3 +5666,83 @@ class TestOrchestrateFiles:
         got = client2.get(f"/api/orchestrate/{oid}/files/pkg/app.py")
         assert got.status_code == 200
         assert got.text == "print('artifact')\n"
+
+
+class TestManagedWorkspace:
+    """Omitting workspace_dir must not silently drop extract_to files —
+    the gateway provisions a managed per-orchestration workspace so a
+    bare goal still yields pullable artifacts."""
+
+    def test_sync_run_gets_managed_workspace(self, gateway, client, store):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('managed')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "out.py"}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        oid = data["orchestration_id"]
+        # Managed workspace assigned under the configured root…
+        assert data["workspace_dir"] is not None
+        assert str(store.store_dir / "workspaces") in data["workspace_dir"]
+        assert oid in data["workspace_dir"]
+        # …and the file actually landed and is pullable.
+        assert data["tasks"][0]["extracted_path"] is not None
+        got = client.get(f"/api/orchestrate/{oid}/files/out.py")
+        assert got.status_code == 200
+        assert got.text == "print('managed')\n"
+
+    def test_background_run_gets_managed_workspace(self, gateway):
+        import time as _time
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('bg')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        with TestClient(gateway._build_http_app()) as client:
+            resp = client.post("/api/orchestrate", json={
+                "goal": "g",
+                "background": True,
+                "tasks": [{"role": "coder", "prompt": "x",
+                           "extract_to": "bg.py"}],
+            })
+            assert resp.status_code == 202
+            oid = resp.json()["orchestration_id"]
+            deadline = _time.monotonic() + 10
+            data = None
+            while _time.monotonic() < deadline:
+                data = client.get(f"/api/orchestrate/{oid}").json()
+                if data["state"] != "running":
+                    break
+                _time.sleep(0.05)
+            assert data["state"] == "completed"
+            assert data["workspace_dir"] is not None
+            assert oid in data["workspace_dir"]
+            got = client.get(f"/api/orchestrate/{oid}/files/bg.py")
+            assert got.status_code == 200
+            assert got.text == "print('bg')\n"
+
+    def test_explicit_workspace_still_wins(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('own')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "mine"),
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "f.py"}],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["workspace_dir"] == str(tmp_path / "mine")

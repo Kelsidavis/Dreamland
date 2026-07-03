@@ -712,24 +712,44 @@ class Orchestrator:
         raise TaskRejectedError(f"reviewer rejected the output: {reason[:500]}")
 
     @staticmethod
-    def _workspace_preamble(workspace_dir: str | None) -> str:
-        """Prefix subtask prompts with a workspace-directive when set.
+    def _workspace_preamble(
+        workspace_dir: str | None, task: AgentTask | None = None,
+    ) -> str:
+        """Per-task workspace directive.
 
-        Subtasks share state via files in this directory: a coder writes
-        ``game.py`` there, and a downstream tester reads it back. Tool
-        execution happens on the coordinator, so a single absolute path
-        works for every subtask regardless of which worker runs it.
+        The directive must match what the task can actually do:
+
+        - ``with_tools`` tasks get the filesystem-tools instruction
+          (they really can call write_file etc. on the coordinator).
+        - ``extract_to`` tasks (chat-fast, no tools) are told their
+          code block is saved FOR them. The old one-size directive
+          told these tasks to "use write_file" — which they can't —
+          and primed exactly that garbage: live runs produced files
+          containing os.makedirs/write_file scaffolding instead of the
+          requested code.
+        - tasks with neither get no workspace text at all.
         """
-        if not workspace_dir:
+        if not workspace_dir or task is None:
             return ""
-        return (
-            f"Shared workspace: {workspace_dir}\n"
-            "Use the filesystem tools (write_file, read_file, edit_file, "
-            "list_directory) against this directory so other subtasks "
-            "in this orchestration can see your work. Prefer relative "
-            "paths under the workspace; absolute paths outside it should "
-            "be avoided unless the goal explicitly requires it.\n\n"
-        )
+        if task.with_tools:
+            return (
+                f"Shared workspace: {workspace_dir}\n"
+                "Use the filesystem tools (write_file, read_file, "
+                "edit_file, list_directory) against this directory so "
+                "other subtasks in this orchestration can see your "
+                "work. Prefer relative paths under the workspace; "
+                "absolute paths outside it should be avoided unless "
+                "the goal explicitly requires it.\n\n"
+            )
+        if task.extract_to:
+            return (
+                f"Your output will be saved automatically as "
+                f"{task.extract_to} in the build's shared workspace — "
+                "you have no filesystem access and must not write "
+                "path-handling or file-writing code. Respond with the "
+                "file's contents in ONE fenced code block.\n\n"
+            )
+        return ""
 
     @staticmethod
     def _failed_deps(task: AgentTask, tasks: list[AgentTask]) -> list[int]:
@@ -762,10 +782,14 @@ class Orchestrator:
         goal: str,
         task: AgentTask,
         tasks: list[AgentTask],
-        workspace_preamble: str,
+        workspace_dir: str | None,
     ) -> str:
-        """Build a subtask's full prompt: workspace directive, results
-        from its dependencies, injected context, then goal + task."""
+        """Build a subtask's full prompt: workspace directive (shaped
+        by the task's capabilities), results from its dependencies,
+        injected context, then goal + task."""
+        workspace_preamble = Orchestrator._workspace_preamble(
+            workspace_dir, task,
+        )
         dep_context = ""
         if task.depends_on:
             dep_results = []
@@ -1151,8 +1175,6 @@ class Orchestrator:
 
         log.info(f"Orchestrating {len(tasks)} tasks for: {goal[:80]}")
 
-        workspace_preamble = self._workspace_preamble(workspace_dir)
-
         for i, task in enumerate(tasks):
             failed_deps = self._failed_deps(task, tasks)
             if failed_deps:
@@ -1164,7 +1186,7 @@ class Orchestrator:
                 continue
 
             full_prompt = self._compose_prompt(
-                goal, task, tasks, workspace_preamble,
+                goal, task, tasks, workspace_dir,
             )
 
             # Execute (extract-and-validate happens INSIDE the retry
@@ -1229,7 +1251,6 @@ class Orchestrator:
         """
         start = time.perf_counter()
         result = OrchestratorResult(tasks=tasks)
-        workspace_preamble = self._workspace_preamble(workspace_dir)
 
         slots = self._concurrency_slots()
         log.info(
@@ -1243,7 +1264,7 @@ class Orchestrator:
                 # Compose inside the slot: dependencies are complete at
                 # launch time, so their results are final here.
                 full_prompt = self._compose_prompt(
-                    goal, task, tasks, workspace_preamble,
+                    goal, task, tasks, workspace_dir,
                 )
                 await self._execute_with_retry(
                     task, full_prompt, workspace_dir=workspace_dir,
