@@ -118,6 +118,17 @@ class AgentTask:
     # "follow-through" loop that keeps a plausible-but-wrong response
     # from silently passing as done.
     verify: bool = False
+    # When True (requires extract_to on a Python file), the coordinator
+    # executes the extracted file after validation; a non-zero exit or
+    # timeout rejects the attempt with the error fed back into the
+    # retry. Chat-fast workers cannot run code — without this, "test
+    # that it works" subtasks can only hallucinate a result. Opt-in
+    # because it executes model-generated code on the coordinator.
+    run_check: bool = False
+    # Captured stdout (trimmed) of a successful run_check. Injected
+    # into dependents' context so downstream subtasks reason about the
+    # program's ACTUAL output rather than the coder's claims.
+    run_output: str | None = None
     # True = reviewer passed the result. None = verification not
     # requested, or the reviewer was unavailable / gave no parseable
     # verdict (result accepted, unverified). False = the task
@@ -250,6 +261,11 @@ class Orchestrator:
         self.skills = skills
         self.memory = memory
         self.dispatcher = dispatcher
+        # Wall-clock ceiling for a run_check execution. 30s covers any
+        # sane generated script; an infinite loop or a blocking
+        # input() call gets killed and rejected instead of wedging the
+        # orchestration. Instance attribute so tests can shrink it.
+        self.run_check_timeout = 30.0
         # Single retry by default. Mirrors `/api/ask`'s primary→alt
         # fallback: if a worker emits empty text or times out, a second
         # attempt typically lands on the alternate worker (since the
@@ -319,6 +335,11 @@ class Orchestrator:
                 # the next retry rather than a terminal "failed" task.
                 if task.extract_to and workspace_dir:
                     self._extract_and_write(task, workspace_dir)
+                    # Execution check before the (more expensive)
+                    # reviewer pass — no point reviewing code that
+                    # doesn't run.
+                    if task.run_check:
+                        await self._run_extracted_file(task, workspace_dir)
                 # Follow-through check runs last, against the fully
                 # validated result — no point reviewing output that
                 # already failed syntax validation.
@@ -429,8 +450,8 @@ class Orchestrator:
             # bodies trigger a retry. `import` covers stubs that just
             # re-export; `def`/`class`/`Assign`/`AnnAssign` cover the
             # real cases.
-            has_substance = any(
-                isinstance(
+            def _substantive(node: ast.stmt) -> bool:
+                if isinstance(
                     node,
                     (
                         ast.FunctionDef
@@ -438,6 +459,7 @@ class Orchestrator:
                         | ast.ClassDef
                         | ast.Assign
                         | ast.AnnAssign
+                        | ast.AugAssign
                         | ast.Import
                         | ast.ImportFrom
                         | ast.If
@@ -445,16 +467,74 @@ class Orchestrator:
                         | ast.While
                         | ast.Try
                         | ast.With
+                        | ast.Raise
+                        | ast.Assert
                     ),
+                ):
+                    return True
+                # A bare expression statement counts only when it's a
+                # call — `print("hi")` is a real script, the literal
+                # text `write_file` (a stray tool name, seen live) is
+                # not.
+                return isinstance(node, ast.Expr) and isinstance(
+                    node.value, ast.Call
                 )
-                for node in tree.body
-            )
+
+            has_substance = any(_substantive(node) for node in tree.body)
             if not has_substance:
                 raise TaskRejectedError(
                     f"extract_to wrote {target.name} but it has no "
                     "substantive code (no def/class/assignment/import) — "
                     f"got {body[:80]!r}"
                 )
+
+    async def _run_extracted_file(
+        self, task: AgentTask, workspace_dir: str,
+    ) -> None:
+        """Execute the file `_extract_and_write` just wrote and reject
+        the attempt if it doesn't run cleanly.
+
+        This is the strongest follow-through check available: chat-fast
+        workers cannot execute anything, so without it a "make sure it
+        runs" instruction can only ever be hallucinated. The stderr
+        tail goes into the rejection so the retry prompt tells the
+        model exactly what crashed.
+
+        Runs with cwd=workspace_dir so sibling files written by earlier
+        subtasks import naturally. Timeout kills the process (infinite
+        loop / blocking input()) and counts as a rejection.
+        """
+        import sys
+        path = task.extracted_path
+        if not path:
+            return
+        name = task.extract_to or path
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, path,
+            cwd=workspace_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.run_check_timeout,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            raise TaskRejectedError(
+                f"run_check: {name} did not finish within "
+                f"{self.run_check_timeout:.0f}s — likely an infinite "
+                "loop or a blocking input() call. The file must run to "
+                "completion non-interactively."
+            ) from None
+        if proc.returncode != 0:
+            tail = stderr.decode("utf-8", errors="replace").strip()[-800:]
+            raise TaskRejectedError(
+                f"run_check: {name} exited with code {proc.returncode}:\n{tail}"
+            )
+        task.run_output = stdout.decode("utf-8", errors="replace")[:2000]
 
     async def _verify_result(self, task: AgentTask) -> None:
         """Ask a reviewer-role worker whether the result followed the
@@ -569,10 +649,20 @@ class Orchestrator:
             dep_results = []
             for dep_idx in task.depends_on:
                 if dep_idx < len(tasks) and tasks[dep_idx].result:
+                    dep = tasks[dep_idx]
                     dep_results.append(
-                        f"[Result from {tasks[dep_idx].role} (task {dep_idx})]:\n"
-                        f"{tasks[dep_idx].result}"
+                        f"[Result from {dep.role} (task {dep_idx})]:\n"
+                        f"{dep.result}"
                     )
+                    # Ground-truth beats claims: when the dependency's
+                    # file was actually executed (run_check), give the
+                    # dependent the real program output too.
+                    if dep.run_output is not None:
+                        dep_results.append(
+                            f"[Actual execution output of "
+                            f"{dep.extract_to} (task {dep_idx})]:\n"
+                            f"{dep.run_output}"
+                        )
             if dep_results:
                 dep_context = "\n\n".join(dep_results) + "\n\n"
 
@@ -636,7 +726,10 @@ class Orchestrator:
             '  "depends_on": [<indices of earlier tasks whose output '
             "this task needs>],\n"
             '  "extract_to": "<relative file path — ONLY for tasks '
-            'that must produce a code file>"\n'
+            'that must produce a code file>",\n'
+            '  "run_check": true  // ONLY with extract_to on a Python '
+            "file that should run to completion — the coordinator "
+            "executes it and feeds errors back\n"
             "}\n\n"
             "Rules:\n"
             "- Each prompt must be self-contained: the worker sees only "
@@ -650,6 +743,14 @@ class Orchestrator:
             "- Do NOT include a meta task like 'plan the work' or "
             "'decide the structure' — this plan IS the planning. Every "
             "task must produce concrete output.\n"
+            "- Workers cannot execute code. Do NOT add a 'run it' or "
+            "'test that it works' task — set run_check on the task "
+            "that produces the file instead.\n"
+            "- Each file is produced by exactly ONE task. Downstream "
+            "tasks receive its contents via depends_on — they must "
+            "not set extract_to to the same file.\n"
+            "- When the goal names specific files, use EXACTLY those "
+            "file names in extract_to.\n"
             "- Only set extract_to on a task whose entire output is "
             "that one file's contents.\n"
             "- Prefer a few substantial tasks over many small ones."
@@ -756,25 +857,63 @@ class Orchestrator:
                 deps.append(d)
             extract_to = entry.get("extract_to")
             if extract_to is not None:
-                if not isinstance(extract_to, str) or not extract_to.strip():
+                if not isinstance(extract_to, str):
                     raise ValueError(
-                        f"tasks[{i}].extract_to must be a non-empty string"
+                        f"tasks[{i}].extract_to must be a string path"
                     )
-                if ".." in extract_to.split("/"):
+                # Planners routinely echo the schema with "" or null
+                # for tasks that produce no file — treat both as
+                # absent rather than failing the whole plan (live
+                # observation: three consecutive plans rejected over
+                # an empty extract_to on a research task).
+                extract_to = extract_to.strip() or None
+                if extract_to and ".." in extract_to.split("/"):
                     raise ValueError(
                         f"tasks[{i}].extract_to must not contain '..'"
                     )
-                extract_to = extract_to.strip()
             with_tools = entry.get("with_tools", False)
             if not isinstance(with_tools, bool):
                 raise ValueError(f"tasks[{i}].with_tools must be a boolean")
+            run_check = entry.get("run_check", False)
+            if not isinstance(run_check, bool):
+                raise ValueError(f"tasks[{i}].run_check must be a boolean")
+            # run_check without a file is meaningless — planners echo
+            # the schema flag onto no-file tasks despite the guidance
+            # (live observation, 3/3 attempts), so drop it instead of
+            # failing the plan. The API keeps its strict 400 for
+            # explicit callers; leniency is planner-only.
+            if run_check and not extract_to:
+                log.info(
+                    "plan: dropping run_check on tasks[%d] (%s) — no "
+                    "extract_to",
+                    i, role,
+                )
+                run_check = False
             tasks.append(AgentTask(
                 role=role,
                 prompt=prompt.strip(),
                 depends_on=deps,
                 with_tools=with_tools,
                 extract_to=extract_to,
+                run_check=run_check,
             ))
+        # One writer per file. Live observation: a 7B planner gave five
+        # of seven tasks extract_to=prime.py, each silently clobbering
+        # the previous version — the shipped file was whichever task
+        # happened to run last. (Hand-authored plans via the API may
+        # still overwrite deliberately; this rule is planner-only.)
+        seen_targets: dict[str, int] = {}
+        for i, t in enumerate(tasks):
+            if not t.extract_to:
+                continue
+            if t.extract_to in seen_targets:
+                raise ValueError(
+                    f"tasks[{i}].extract_to={t.extract_to!r} is already "
+                    f"produced by tasks[{seen_targets[t.extract_to]}] — "
+                    "each file must be written by exactly one task; "
+                    "downstream tasks read it via depends_on"
+                )
+            seen_targets[t.extract_to] = i
         return tasks
 
     async def run(

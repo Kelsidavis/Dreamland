@@ -5288,3 +5288,36 @@ class TestAlternateChatWorker:
         alt = gateway._pick_alternate_chat_worker(exclude={"small"})
         assert alt is not None
         assert alt.id == "busy-big"
+
+
+class TestOrchestrateRunCheck:
+    def test_run_check_without_extract_to_rejected(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x", "run_check": True}],
+        })
+        assert resp.status_code == 400
+        assert "run_check" in resp.json()["error"]
+
+    def test_run_check_executes_and_surfaces_output(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('live')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "ws"),
+            "tasks": [{
+                "role": "coder", "prompt": "write it",
+                "extract_to": "live.py", "run_check": True,
+            }],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["tasks"][0]["run_check"] is True
+        assert data["tasks"][0]["run_output"] == "live\n"

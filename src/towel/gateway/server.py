@@ -7148,7 +7148,9 @@ class GatewayServer:
                       "role": "architect",          // see ROLE_PROMPTS
                       "prompt": "...",              // what this subtask does
                       "depends_on": [0, 1],         // optional, indices into tasks
-                      "verify": true                // optional, reviewer checks result
+                      "verify": true,               // optional, reviewer checks result
+                      "run_check": true             // optional, execute extract_to file;
+                                                    // failures retry with the error
                     },
                     ...
                   ],
@@ -7292,6 +7294,20 @@ class GatewayServer:
                         {"error": f"tasks[{i}].verify must be a boolean"},
                         status_code=400,
                     )
+                run_check_raw = raw.get("run_check", False)
+                if not isinstance(run_check_raw, bool):
+                    return JSONResponse(
+                        {"error": f"tasks[{i}].run_check must be a boolean"},
+                        status_code=400,
+                    )
+                if run_check_raw and not extract_to_val:
+                    return JSONResponse(
+                        {"error": (
+                            f"tasks[{i}].run_check requires extract_to — "
+                            "there is no file to execute otherwise"
+                        )},
+                        status_code=400,
+                    )
                 tasks.append(AgentTask(
                     role=role,
                     prompt=prompt.strip(),
@@ -7299,6 +7315,7 @@ class GatewayServer:
                     with_tools=with_tools_raw,
                     extract_to=extract_to_val,
                     verify=verify_raw,
+                    run_check=run_check_raw,
                 ))
 
             parallel = bool(body.get("parallel", False))
@@ -7407,6 +7424,8 @@ class GatewayServer:
                         "elapsed_ms": round(t.elapsed * 1000.0, 1),
                         "attempts": t.attempts,
                         "verified": t.verified,
+                        "run_check": t.run_check,
+                        "run_output": t.run_output,
                         "result": t.result,
                     }
                     for t in result.tasks

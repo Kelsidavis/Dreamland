@@ -1004,3 +1004,183 @@ class TestPlan:
         orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
         tasks = asyncio.run(orch.plan("g", verify=True))
         assert all(t.verify for t in tasks)
+
+
+class TestRunCheck:
+    """`run_check=True` executes the extracted file coordinator-side;
+    a crash or timeout rejects the attempt with the error fed back —
+    real execution instead of a hallucinated 'I ran it and it works'."""
+
+    def test_crash_feeds_stderr_back_and_retry_recovers(self, tmp_path):
+        from towel.config import TowelConfig
+
+        class _BadThenGood:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    return "```python\nraise RuntimeError('kaboom')\n```"
+                return "```python\nprint('recovered')\n```"
+
+        dispatcher = _BadThenGood()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = [AgentTask(
+            role="coder", prompt="write app.py",
+            extract_to="app.py", run_check=True,
+        )]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        assert tasks[0].attempts == 2
+        # The retry prompt carries the crash.
+        assert "kaboom" in dispatcher.prompts[1]
+        assert "run_check" in dispatcher.prompts[1]
+        # Successful run captured real stdout.
+        assert tasks[0].run_output == "recovered\n"
+
+    def test_timeout_rejects(self, tmp_path):
+        from towel.config import TowelConfig
+
+        class _Sleeper:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return "```python\nimport time\ntime.sleep(30)\n```"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Sleeper(), max_attempts=1)
+        orch.run_check_timeout = 0.5
+        tasks = [AgentTask(
+            role="coder", prompt="x", extract_to="slow.py", run_check=True,
+        )]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert not result.success
+        assert tasks[0].status == "failed"
+        assert "did not finish" in tasks[0].result
+
+    def test_run_output_injected_into_dependent_context(self, tmp_path):
+        from towel.config import TowelConfig
+
+        class _Coder:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if role == "coder":
+                    return "```python\nprint(6 * 7)\n```"
+                return "confirmed"
+
+        dispatcher = _Coder()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="write answer.py",
+                      extract_to="answer.py", run_check=True),
+            AgentTask(role="reviewer", prompt="confirm the output",
+                      depends_on=[0]),
+        ]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        reviewer_prompt = dispatcher.prompts[-1]
+        assert "Actual execution output" in reviewer_prompt
+        assert "42" in reviewer_prompt
+
+    def test_plan_accepts_run_check(self):
+        from towel.config import TowelConfig
+
+        class _Planner:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "coder", "prompt": "write it",'
+                    ' "extract_to": "x.py", "run_check": true}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        tasks = asyncio.run(orch.plan("g"))
+        assert tasks[0].run_check is True
+
+    def test_plan_drops_run_check_without_extract_to(self):
+        """Planners echo run_check onto no-file tasks despite the
+        guidance; that normalizes to False rather than failing the
+        plan (rejection was observed to burn all attempts live)."""
+        from towel.config import TowelConfig
+
+        class _Echoey:
+            def __init__(self) -> None:
+                self.count = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.count += 1
+                return '[{"role": "coder", "prompt": "x", "run_check": true}]'
+
+        dispatcher = _Echoey()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = asyncio.run(orch.plan("g"))
+        assert len(tasks) == 1
+        assert tasks[0].run_check is False
+        assert dispatcher.count == 1
+
+    def test_plan_rejects_duplicate_extract_targets(self):
+        from towel.config import TowelConfig
+
+        class _DupThenGood:
+            def __init__(self) -> None:
+                self.count = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.count += 1
+                if self.count == 1:
+                    return (
+                        '[{"role": "coder", "prompt": "a", "extract_to": "x.py"},'
+                        ' {"role": "reviewer", "prompt": "b",'
+                        ' "extract_to": "x.py", "depends_on": [0]}]'
+                    )
+                return '[{"role": "coder", "prompt": "a", "extract_to": "x.py"}]'
+
+        dispatcher = _DupThenGood()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = asyncio.run(orch.plan("g"))
+        assert len(tasks) == 1
+        assert dispatcher.count == 2
+
+    def test_plan_tolerates_empty_extract_to(self):
+        """Planners echo the schema with "" for no-file tasks — that
+        must normalize to None, not fail the plan."""
+        from towel.config import TowelConfig
+
+        class _Planner:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "researcher", "prompt": "look", "extract_to": ""},'
+                    ' {"role": "coder", "prompt": "code", "extract_to": "x.py"}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        tasks = asyncio.run(orch.plan("g"))
+        assert tasks[0].extract_to is None
+        assert tasks[1].extract_to == "x.py"
