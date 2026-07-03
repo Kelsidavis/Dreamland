@@ -85,7 +85,7 @@ class TestOrchestrateEndpoint:
             with_tools, task_type, exclude_workers,
         ):
             calls.append({"role": role, "prompt": prompt})
-            if role == "architect" and len(calls) == 1:
+            if role == "planner" and len(calls) == 1:
                 return (
                     '[{"role": "coder", "prompt": "write greet.py"},'
                     ' {"role": "reviewer", "prompt": "check it",'
@@ -103,7 +103,7 @@ class TestOrchestrateEndpoint:
         assert [t["role"] for t in data["tasks"]] == ["coder", "reviewer"]
         assert data["tasks"][1]["depends_on"] == [0]
         # First dispatch was the planning call itself.
-        assert calls[0]["role"] == "architect"
+        assert calls[0]["role"] == "planner"
         assert "build a greeter" in calls[0]["prompt"]
 
     def test_auto_plan_without_fleet_returns_502(self, client):

@@ -189,6 +189,12 @@ ROLE_PROMPTS: dict[str, str] = {
         "scalability, and maintainability. Provide schemas, data flow diagrams (as ASCII), "
         "and API specifications."
     ),
+    "planner": (
+        "You are a planning engine that decomposes goals into machine-readable "
+        "task plans. You respond with STRICT JSON only — no prose, no markdown "
+        "fences, no explanations, no checklists. Your entire response must be "
+        "parseable by json.loads."
+    ),
     "tester": (
         "You are a QA engineer. Write comprehensive tests covering edge cases, error "
         "conditions, and typical usage. Use the appropriate testing framework."
@@ -212,6 +218,7 @@ ROLE_PROMPTS: dict[str, str] = {
 # request. Explicit mapping closes the gap.
 ROLE_TASK_TYPES: dict[str, str] = {
     "architect": "plan",
+    "planner": "plan",
     "coder": "generate",
     "researcher": "research",
     "reviewer": "code_review",
@@ -607,7 +614,15 @@ class Orchestrator:
         Raises ValueError when no valid plan emerges after
         `self.max_attempts` tries.
         """
-        roles = ", ".join(sorted(r for r in ROLE_PROMPTS if r != "default"))
+        # "planner" is the internal role plan() itself dispatches as —
+        # its strict-JSON system prompt would make any subtask assigned
+        # to it emit JSON instead of real output (live observation: a
+        # planner-role subtask produced a write_file JSON blob where a
+        # Python file was expected). "default" adds nothing over the
+        # specific roles. Keep both out of the menu.
+        roles = ", ".join(
+            sorted(r for r in ROLE_PROMPTS if r not in ("default", "planner"))
+        )
         base_prompt = (
             f"Decompose the following goal into 1-{max_tasks} subtasks "
             "for specialist workers.\n\n"
@@ -632,6 +647,11 @@ class Orchestrator:
             "and no prose.\n"
             "- depends_on may only reference earlier tasks (smaller "
             "index). Omit it or use [] for independent tasks.\n"
+            "- Do NOT include a meta task like 'plan the work' or "
+            "'decide the structure' — this plan IS the planning. Every "
+            "task must produce concrete output.\n"
+            "- Only set extract_to on a task whose entire output is "
+            "that one file's contents.\n"
             "- Prefer a few substantial tasks over many small ones."
         )
         feedback: str | None = None
@@ -645,13 +665,29 @@ class Orchestrator:
                     f"{feedback}\n"
                     "Return a corrected JSON array."
                 )
-            text = await self._run_agent("architect", prompt)
+            # Dispatch as "planner", not "architect" — the architect
+            # role prompt asks for schemas and ASCII diagrams, which
+            # directly fights the JSON-only requirement here. Live
+            # observation: a 7B worker under the architect identity
+            # returned markdown checklists for every planning attempt.
+            try:
+                text = await self._run_agent("planner", prompt)
+            except WorkerDispatchError as exc:
+                # Infra failure (worker died, empty text): burn the
+                # attempt but don't add feedback — the model never saw
+                # this prompt fail.
+                last_exc = exc
+                log.warning("plan(%r): dispatch failed, retrying: %s", goal[:60], exc)
+                continue
             try:
                 tasks = self._parse_plan(text)
             except ValueError as exc:
                 feedback = str(exc)
                 last_exc = exc
-                log.warning("plan(%r): invalid plan, retrying: %s", goal[:60], exc)
+                log.warning(
+                    "plan(%r): invalid plan, retrying: %s — raw response: %r",
+                    goal[:60], exc, text[:400],
+                )
                 continue
             if verify:
                 for t in tasks:
@@ -698,10 +734,11 @@ class Orchestrator:
             if not isinstance(entry, dict):
                 raise ValueError(f"tasks[{i}] must be a JSON object")
             role = entry.get("role")
-            if role not in ROLE_PROMPTS:
+            if role not in ROLE_PROMPTS or role == "planner":
+                valid = sorted(r for r in ROLE_PROMPTS if r != "planner")
                 raise ValueError(
-                    f"tasks[{i}].role={role!r} is unknown; valid roles: "
-                    f"{sorted(ROLE_PROMPTS)}"
+                    f"tasks[{i}].role={role!r} is not usable in a plan; "
+                    f"valid roles: {valid}"
                 )
             prompt = entry.get("prompt")
             if not isinstance(prompt, str) or not prompt.strip():
