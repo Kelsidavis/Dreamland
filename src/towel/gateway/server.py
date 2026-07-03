@@ -2947,9 +2947,37 @@ class GatewayServer:
         )
         self._orch_history[oid] = record
         try:
-            self.orch_store.save(self._orch_history)
+            evicted = self.orch_store.save(self._orch_history)
         except OSError as exc:
             log.warning("orchestration history save failed: %s", exc)
+            return
+        for old_oid, old_rec in evicted.items():
+            self._prune_managed_workspace(old_oid, old_rec)
+
+    def _prune_managed_workspace(
+        self, oid: str, record: dict[str, Any],
+    ) -> None:
+        """Delete an evicted run's workspace — but ONLY if it's the
+        managed one this gateway provisioned (workspace_root/<oid>).
+        Caller-supplied workspace paths are the user's directories and
+        are never touched.
+        """
+        ws = record.get("workspace_dir")
+        if not ws:
+            return
+        expected = (self.workspace_root / oid).resolve()
+        try:
+            actual = Path(ws).resolve()
+        except OSError:
+            return
+        if actual != expected or not actual.is_dir():
+            return
+        import shutil
+        try:
+            shutil.rmtree(actual)
+            log.info("pruned managed workspace for evicted run %s", oid)
+        except OSError as exc:
+            log.warning("workspace prune failed for %s: %s", oid, exc)
 
     def available_worker_count(self) -> int:
         """How many workers can accept orchestrator subtasks right now.

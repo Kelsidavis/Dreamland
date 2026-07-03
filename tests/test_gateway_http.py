@@ -5746,3 +5746,36 @@ class TestManagedWorkspace:
         })
         assert resp.status_code == 200
         assert resp.json()["workspace_dir"] == str(tmp_path / "mine")
+
+
+class TestWorkspacePruning:
+    """Evicted history records get their MANAGED workspaces deleted;
+    caller-supplied workspace paths are never touched."""
+
+    def test_managed_workspace_pruned(self, gateway):
+        oid = "prune-me-1234"
+        ws = gateway.workspace_root / oid
+        ws.mkdir(parents=True)
+        (ws / "artifact.py").write_text("x = 1\n")
+        gateway._prune_managed_workspace(oid, {"workspace_dir": str(ws)})
+        assert not ws.exists()
+
+    def test_user_workspace_never_touched(self, gateway, tmp_path):
+        user_dir = tmp_path / "my-project"
+        user_dir.mkdir()
+        (user_dir / "precious.py").write_text("keep me\n")
+        gateway._prune_managed_workspace(
+            "some-id", {"workspace_dir": str(user_dir)},
+        )
+        assert user_dir.exists()
+        assert (user_dir / "precious.py").read_text() == "keep me\n"
+
+    def test_mismatched_id_not_pruned(self, gateway):
+        """A managed-root path recorded under a DIFFERENT id must not
+        be deleted — only workspace_root/<this oid> qualifies."""
+        other = gateway.workspace_root / "other-run"
+        other.mkdir(parents=True)
+        gateway._prune_managed_workspace(
+            "some-id", {"workspace_dir": str(other)},
+        )
+        assert other.exists()

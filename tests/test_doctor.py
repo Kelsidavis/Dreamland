@@ -341,7 +341,7 @@ class TestRunDoctor:
         config = TowelConfig()
         config.gateway.port = 19997  # avoid conflicts
         checks = run_doctor(config)
-        assert len(checks) == 12
+        assert len(checks) == 13
         names = [c.name for c in checks]
         assert "Environment" in names
         assert "Configuration" in names
@@ -361,3 +361,37 @@ class TestRunDoctor:
         for c in checks:
             # Each check should have been finalized (passed is set)
             assert isinstance(c.passed, bool)
+
+
+class TestOrchestrationsCheck:
+    def test_orchestrations_check_runs(self):
+        """Smoke: the check reads whatever history exists (possibly
+        none) without raising, like the other store-backed checks."""
+        from towel.cli.doctor import check_orchestrations
+
+        c = check_orchestrations()
+        c.finalize()
+        # Never a hard failure from merely reading history.
+        assert not c.errors
+
+    def test_orchestrations_check_reads_records(self, tmp_path, monkeypatch):
+        from towel.cli import doctor as doctor_mod
+        from towel.persistence.orchestrations import OrchestrationStore
+
+        store = OrchestrationStore(path=tmp_path / "orch.json")
+        store.save({
+            "run1": {"goal": "build the thing", "state": "completed",
+                     "goal_achieved": True,
+                     "created_at": "2026-07-03T00:00:00+00:00"},
+            "run2": {"goal": "other", "state": "interrupted",
+                     "created_at": "2026-07-02T00:00:00+00:00"},
+        })
+        monkeypatch.setattr(
+            "towel.persistence.orchestrations.DEFAULT_ORCHESTRATIONS_PATH",
+            tmp_path / "orch.json",
+        )
+        c = doctor_mod.check_orchestrations()
+        c.finalize()
+        assert any("2 run(s)" in d for d in c.details)
+        assert any("interrupted" in w for w in c.warnings)
+        assert any("build the thing" in d for d in c.details)

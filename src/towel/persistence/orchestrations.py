@@ -58,25 +58,37 @@ class OrchestrationStore:
             if isinstance(k, str) and isinstance(v, dict)
         }
 
-    def save(self, records: dict[str, dict[str, Any]]) -> None:
+    def save(
+        self, records: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         """Persist records, keeping only the newest MAX_RECORDS.
 
         Recency comes from each record's ``created_at`` (ISO-8601,
         lexicographically sortable); records missing it sort oldest.
+
+        Returns the EVICTED records (empty when under the cap) so the
+        caller can clean up per-run resources — the gateway deletes
+        evicted runs' managed workspaces, which would otherwise
+        accumulate on disk forever. Evicted entries are also removed
+        from the caller's ``records`` dict so memory and disk agree.
         """
+        evicted: dict[str, dict[str, Any]] = {}
         if len(records) > MAX_RECORDS:
-            newest = sorted(
+            ordered = sorted(
                 records.items(),
                 key=lambda kv: kv[1].get("created_at", ""),
                 reverse=True,
-            )[:MAX_RECORDS]
-            records = dict(newest)
+            )
+            for oid, rec in ordered[MAX_RECORDS:]:
+                evicted[oid] = rec
+                records.pop(oid, None)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(
             json.dumps(records, ensure_ascii=False, indent=1),
             encoding="utf-8",
         )
         tmp.replace(self.path)
+        return evicted
 
     def _back_up_corrupt(self, exc: Exception) -> None:
         import time

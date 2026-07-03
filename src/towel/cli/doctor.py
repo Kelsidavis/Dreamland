@@ -79,6 +79,7 @@ def run_doctor(config: TowelConfig | None = None) -> list[Check]:
     checks.append(check_gateway(config))
     checks.append(check_storage())
     checks.append(check_persisted_worker_state())
+    checks.append(check_orchestrations())
     checks.append(check_sqlite_fts5())
     checks.append(check_memory_embeddings())
     checks.append(check_memory_store())
@@ -867,6 +868,85 @@ def check_persisted_worker_state() -> Check:
             "/workers/{id}/tasks"
         )
 
+    return c
+
+
+def check_orchestrations() -> Check:
+    """Surface orchestration-run history and managed-workspace usage.
+
+    Operators asking "what has the fleet been building, and did it
+    work?" get the answer here instead of curling /api/orchestrations:
+    state histogram over persisted history, the most recent run, and
+    how much disk the managed workspaces are holding.
+    """
+    from towel.config import TOWEL_HOME
+    from towel.persistence.orchestrations import OrchestrationStore
+
+    c = Check("Orchestrations")
+    store = OrchestrationStore()
+    if not store.path.exists():
+        c.ok("No orchestration runs recorded yet")
+        return c
+    try:
+        records = store.load()
+    except Exception as exc:
+        c.fail(f"Failed to read {store.path}: {exc}")
+        return c
+    if not records:
+        c.ok(f"{store.path} is present but empty")
+        return c
+
+    states: dict[str, int] = {}
+    for rec in records.values():
+        state = rec.get("state") or "unknown"
+        states[state] = states.get(state, 0) + 1
+    histogram = ", ".join(f"{k}={v}" for k, v in sorted(states.items()))
+    c.ok(f"{len(records)} run(s) in history: {histogram}")
+
+    newest = max(records.values(), key=lambda r: r.get("created_at", ""))
+    goal = (newest.get("goal") or "")[:70]
+    # Parentheses, not [state] — square brackets are Rich markup and a
+    # bare [completed] tag silently vanishes from the output.
+    c.details.append(
+        f"Latest ({newest.get('state')}): {goal} "
+        f"@ {newest.get('created_at', 'no timestamp')}"
+    )
+
+    achieved = sum(1 for r in records.values() if r.get("goal_achieved") is True)
+    missed = sum(1 for r in records.values() if r.get("goal_achieved") is False)
+    if achieved or missed:
+        c.details.append(f"Goal audits: {achieved} achieved, {missed} incomplete")
+
+    interrupted = states.get("interrupted", 0)
+    if interrupted:
+        c.warn(
+            f"{interrupted} run(s) interrupted by coordinator restarts"
+        )
+    failed = states.get("failed", 0)
+    if failed:
+        c.warn(f"{failed} run(s) failed — inspect via `towel orchestrations`")
+
+    ws_root = TOWEL_HOME / "workspaces"
+    if ws_root.is_dir():
+        total = 0
+        count = 0
+        for p in ws_root.rglob("*"):
+            if p.is_file():
+                try:
+                    total += p.stat().st_size
+                except OSError:
+                    continue
+        count = sum(1 for d in ws_root.iterdir() if d.is_dir())
+        c.details.append(
+            f"Managed workspaces: {count} dir(s), "
+            f"{total / (1024 * 1024):.1f} MB under {ws_root}"
+        )
+        if total > 1024 * 1024 * 1024:
+            c.warn("Managed workspaces exceed 1 GB")
+            c.suggestions.append(
+                "Old workspaces are pruned when history evicts their "
+                "runs; delete unneeded dirs by hand if disk is tight"
+            )
     return c
 
 
