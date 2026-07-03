@@ -53,7 +53,16 @@ class TaskRejectedError(ValueError):
     the model can correct course instead of re-rolling blind.
     Subclasses ValueError so callers that caught the extraction
     ValueErrors keep working.
+
+    ``retryable=False`` marks rejections that regenerating THIS task
+    cannot fix — e.g. an import-name error rooted in a sibling task's
+    file. The retry loop fails the task immediately instead of burning
+    attempts; the goal-audit/repair round owns cross-file fixes.
     """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class RoleDispatcher(Protocol):
@@ -291,6 +300,7 @@ class Orchestrator:
         full_prompt: str,
         *,
         workspace_dir: str | None = None,
+        all_tasks: list[AgentTask] | None = None,
     ) -> None:
         """Run a subtask, retrying once on failure.
 
@@ -350,7 +360,9 @@ class Orchestrator:
                     # reviewer pass — no point reviewing code that
                     # doesn't run.
                     if task.run_check:
-                        await self._run_extracted_file(task, workspace_dir)
+                        await self._run_extracted_file(
+                            task, workspace_dir, all_tasks,
+                        )
                 # Follow-through check runs last, against the fully
                 # validated result — no point reviewing output that
                 # already failed syntax validation.
@@ -366,6 +378,12 @@ class Orchestrator:
                     "Task (%s, attempt %d/%d) rejected: %s",
                     task.role, attempt + 1, self.max_attempts, e,
                 )
+                if not e.retryable:
+                    # Regenerating this task can't fix the problem
+                    # (e.g. the bug lives in a sibling's file) — fail
+                    # now and let the repair round handle it instead
+                    # of burning the remaining attempts.
+                    break
                 await asyncio.sleep(0)
             except WorkerDispatchError as e:
                 last_exc = e
@@ -506,27 +524,12 @@ class Orchestrator:
                     f"got {body[:80]!r}"
                 )
 
-    async def _run_extracted_file(
-        self, task: AgentTask, workspace_dir: str,
-    ) -> None:
-        """Execute the file `_extract_and_write` just wrote and reject
-        the attempt if it doesn't run cleanly.
-
-        This is the strongest follow-through check available: chat-fast
-        workers cannot execute anything, so without it a "make sure it
-        runs" instruction can only ever be hallucinated. The stderr
-        tail goes into the rejection so the retry prompt tells the
-        model exactly what crashed.
-
-        Runs with cwd=workspace_dir so sibling files written by earlier
-        subtasks import naturally. Timeout kills the process (infinite
-        loop / blocking input()) and counts as a rejection.
-        """
+    async def _exec_file_once(
+        self, path: str, workspace_dir: str,
+    ) -> tuple[int | None, str, str]:
+        """Run one Python file to completion. Returns (returncode,
+        stdout, stderr); returncode None means timeout."""
         import sys
-        path = task.extracted_path
-        if not path:
-            return
-        name = task.extract_to or path
         proc = await asyncio.create_subprocess_exec(
             sys.executable, path,
             cwd=workspace_dir,
@@ -541,18 +544,115 @@ class Orchestrator:
         except TimeoutError:
             proc.kill()
             await proc.communicate()
+            return None, "", ""
+        return (
+            proc.returncode,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+
+    async def _run_extracted_file(
+        self,
+        task: AgentTask,
+        workspace_dir: str,
+        all_tasks: list[AgentTask] | None = None,
+    ) -> None:
+        """Execute the file `_extract_and_write` just wrote and reject
+        the attempt if it doesn't run cleanly.
+
+        This is the strongest follow-through check available: chat-fast
+        workers cannot execute anything, so without it a "make sure it
+        runs" instruction can only ever be hallucinated. The stderr
+        tail goes into the rejection so the retry prompt tells the
+        model exactly what crashed.
+
+        Runs with cwd=workspace_dir so sibling files written by earlier
+        subtasks import naturally. Timeout kills the process (infinite
+        loop / blocking input()) and counts as a rejection.
+
+        Sibling-import race: under parallel scheduling an entry point
+        can be written (and executed) before the library it imports
+        exists — planners routinely mark such tasks independent
+        despite the guidance. A ModuleNotFoundError whose module is
+        another task's extract_to waits for that producer to finish
+        and re-runs, instead of burning every retry regenerating a
+        file that was never the problem (observed live: main.py failed
+        3/3 attempts while calc.py was still generating).
+        """
+        import re
+        path = task.extracted_path
+        if not path:
+            return
+        name = task.extract_to or path
+        rc, stdout, stderr = await self._exec_file_once(path, workspace_dir)
+        if rc == 0:
+            task.run_output = stdout[:2000]
+            return
+        if rc is None:
             raise TaskRejectedError(
                 f"run_check: {name} did not finish within "
                 f"{self.run_check_timeout:.0f}s — likely an infinite "
                 "loop or a blocking input() call. The file must run to "
                 "completion non-interactively."
-            ) from None
-        if proc.returncode != 0:
-            tail = stderr.decode("utf-8", errors="replace").strip()[-800:]
-            raise TaskRejectedError(
-                f"run_check: {name} exited with code {proc.returncode}:\n{tail}"
             )
-        task.run_output = stdout.decode("utf-8", errors="replace")[:2000]
+        missing = re.search(
+            r"ModuleNotFoundError: No module named '([\w.]+)'", stderr,
+        )
+        if missing and all_tasks:
+            mod_file = missing.group(1).split(".")[0] + ".py"
+            producer = next(
+                (t for t in all_tasks
+                 if t is not task and t.extract_to == mod_file),
+                None,
+            )
+            if producer is not None:
+                log.info(
+                    "run_check: %s imports %s produced by a sibling "
+                    "task (%s) — waiting for it",
+                    name, mod_file, producer.status,
+                )
+                # Poll the sibling's status; its extract happens inside
+                # its completion, so completed ⇒ the file exists.
+                for _ in range(240):
+                    if producer.status not in ("pending", "running"):
+                        break
+                    await asyncio.sleep(0.5)
+                if producer.status == "completed":
+                    rc, stdout, stderr = await self._exec_file_once(
+                        path, workspace_dir,
+                    )
+                    if rc == 0:
+                        task.run_output = stdout[:2000]
+                        return
+        tail = stderr.strip()[-800:]
+        # An import-NAME error rooted in a completed sibling's file is
+        # unfixable from here: this file's import matches the goal, the
+        # sibling's contents don't. Fail fast (non-retryable) so the
+        # repair round fixes the right file — observed live: main.py
+        # burned 3 regenerations over calc.py's missing subtract().
+        name_err = re.search(
+            r"ImportError: cannot import name '[\w.]+' from '([\w.]+)'",
+            stderr,
+        )
+        if name_err and all_tasks:
+            sib_file = name_err.group(1).split(".")[0] + ".py"
+            producer = next(
+                (t for t in all_tasks
+                 if t is not task and t.extract_to == sib_file
+                 and t.status == "completed"),
+                None,
+            )
+            if producer is not None:
+                raise TaskRejectedError(
+                    f"run_check: {name} exited with code {rc}:\n{tail}\n"
+                    f"The missing name lives in {sib_file}, produced by "
+                    "another task — regenerating this file cannot fix "
+                    f"it; {sib_file} must be corrected.",
+                    retryable=False,
+                )
+        raise TaskRejectedError(
+            f"run_check: {name} exited with code {rc}:\n{tail}"
+        )
 
     async def _verify_result(self, task: AgentTask) -> None:
         """Ask a reviewer-role worker whether the result followed the
@@ -579,8 +679,12 @@ class Orchestrator:
             "Did the output follow the instructions and accomplish the "
             "task? Minor style differences are fine; missing "
             "requirements, ignored constraints, or off-task output are "
-            "not. Reply with exactly one line: 'VERDICT: PASS' or "
-            "'VERDICT: FAIL — <what is wrong and what to fix>'."
+            "not. Output that includes MORE than asked (extra "
+            "functions, extra explanation) still PASSES as long as "
+            "everything required is present and correct — judge for "
+            "missing work, not for surplus. Reply with exactly one "
+            "line: 'VERDICT: PASS' or 'VERDICT: FAIL — <what is wrong "
+            "and what to fix>'."
         )
         try:
             text = await self._run_agent("reviewer", prompt)
@@ -801,6 +905,11 @@ class Orchestrator:
             "- Workers cannot execute code. Do NOT add a 'run it' or "
             "'test that it works' task — set run_check on the task "
             "that produces the file instead.\n"
+            "- run_check executes the file in the shared workspace, so "
+            "a file that IMPORTS another generated file must "
+            "depends_on the task producing that file (or the import "
+            "fails). Put run_check on the entry-point file; library "
+            "modules with no __main__ effect don't need it.\n"
             "- Each file is produced by exactly ONE task. Downstream "
             "tasks receive its contents via depends_on — they must "
             "not set extract_to to the same file.\n"
@@ -1013,6 +1122,20 @@ class Orchestrator:
                 t.run_check = False
                 continue
             seen_targets[t.extract_to] = i
+        # A plan that writes Python but never executes any of it gives
+        # the goal audit zero ground truth — the auditor then judges
+        # from truncated text excerpts and hallucinates gaps (observed
+        # live: 'missing parenthesis' on files that ran fine). Ensure
+        # at least one execution point: the LAST .py-producing task is
+        # the entry point by dependency order; executing a library
+        # module instead is harmless (no __main__ effect, exit 0).
+        py_tasks = [t for t in tasks if (t.extract_to or "").endswith(".py")]
+        if py_tasks and not any(t.run_check for t in py_tasks):
+            py_tasks[-1].run_check = True
+            log.info(
+                "plan: no run_check on any .py task — enabling it on "
+                "the last file task (%s)", py_tasks[-1].extract_to,
+            )
         return tasks
 
     async def run(
@@ -1050,6 +1173,7 @@ class Orchestrator:
             # broken code on disk).
             await self._execute_with_retry(
                 task, full_prompt, workspace_dir=workspace_dir,
+                all_tasks=tasks,
             )
             log.info(
                 "Task %d (%s): %s in %.1fs (attempts=%d)",
@@ -1123,6 +1247,7 @@ class Orchestrator:
                 )
                 await self._execute_with_retry(
                     task, full_prompt, workspace_dir=workspace_dir,
+                    all_tasks=tasks,
                 )
             log.info(
                 "Task %d (%s): %s in %.1fs (attempts=%d)",
@@ -1176,6 +1301,61 @@ class Orchestrator:
         result.total_elapsed = time.perf_counter() - start
         self._synthesize(goal, result)
         return result
+
+    async def _refresh_run_outputs(
+        self,
+        result: OrchestratorResult,
+        workspace_dir: str | None,
+    ) -> None:
+        """Re-execute every run_check file against the FINAL workspace
+        so the goal audit judges current evidence.
+
+        A task's run_output is captured when its file is written — but
+        a later task or repair round can rewrite a sibling the file
+        imports, silently invalidating that snapshot. A failed re-run
+        overwrites run_output with the error, which is exactly the
+        evidence the audit needs to demand a repair. Best-effort:
+        execution problems are recorded, never raised.
+        """
+        if not workspace_dir:
+            return
+        for task in result.tasks:
+            if not (task.run_check and task.status == "completed"
+                    and task.extracted_path):
+                continue
+            import sys
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable, task.extracted_path,
+                    cwd=workspace_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.DEVNULL,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.run_check_timeout,
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                task.run_output = (
+                    f"[re-run of {task.extract_to} timed out after "
+                    f"{self.run_check_timeout:.0f}s]"
+                )
+                continue
+            except OSError as exc:
+                task.run_output = f"[re-run of {task.extract_to} failed: {exc}]"
+                continue
+            if proc.returncode != 0:
+                tail = stderr.decode("utf-8", errors="replace").strip()[-500:]
+                task.run_output = (
+                    f"[re-run of {task.extract_to} exited "
+                    f"{proc.returncode}]\n{tail}"
+                )
+            else:
+                task.run_output = stdout.decode(
+                    "utf-8", errors="replace",
+                )[:2000]
 
     @staticmethod
     def _orchestration_summary(
@@ -1427,6 +1607,7 @@ class Orchestrator:
             return result
 
         start_check = time.perf_counter()
+        await self._refresh_run_outputs(result, workspace_dir)
         achieved, feedback = await self.check_goal(goal, result, workspace_dir)
         result.goal_achieved = achieved
         result.goal_feedback = feedback
@@ -1446,6 +1627,7 @@ class Orchestrator:
             await runner(goal, repair_tasks, workspace_dir=workspace_dir)
             result.tasks.extend(repair_tasks)
             result.repair_tasks_added = len(repair_tasks)
+            await self._refresh_run_outputs(result, workspace_dir)
             achieved, feedback = await self.check_goal(
                 goal, result, workspace_dir,
             )

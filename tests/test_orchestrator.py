@@ -1721,3 +1721,199 @@ class TestAuditPanel:
         result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         assert dispatcher.reviews == 1
         assert result.goal_achieved is True
+
+
+class TestMultiFilePlans:
+    def test_plan_forces_run_check_when_none_set(self):
+        """A plan writing Python but executing none of it leaves the
+        goal audit with zero ground truth — the last .py task gets
+        run_check enabled (entry point by dependency order)."""
+        from towel.config import TowelConfig
+
+        class _NoChecks:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "coder", "prompt": "lib", "extract_to": "calc.py"},'
+                    ' {"role": "coder", "prompt": "entry",'
+                    ' "extract_to": "main.py", "depends_on": [0]}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_NoChecks())
+        tasks = asyncio.run(orch.plan("g"))
+        assert tasks[0].run_check is False
+        assert tasks[1].run_check is True
+
+    def test_plan_respects_existing_run_check(self):
+        from towel.config import TowelConfig
+
+        class _HasCheck:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "coder", "prompt": "a", "extract_to": "a.py",'
+                    ' "run_check": true},'
+                    ' {"role": "coder", "prompt": "b", "extract_to": "b.py"}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_HasCheck())
+        tasks = asyncio.run(orch.plan("g"))
+        assert tasks[0].run_check is True
+        # No forced check on the last task — one exists already.
+        assert tasks[1].run_check is False
+
+
+class TestRefreshRunOutputs:
+    def test_stale_output_refreshed_from_final_workspace(self, tmp_path):
+        """A sibling rewrite after a file's run_check must show up in
+        the evidence the audit sees — the pre-audit re-run replaces the
+        stale snapshot."""
+        from towel.config import TowelConfig
+
+        class _Auditor:
+            def __init__(self) -> None:
+                self.audit_prompt: str | None = None
+
+            def available_worker_count(self) -> int:
+                return 1
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    self.audit_prompt = prompt
+                    return "VERDICT: ACHIEVED"
+                return "```python\nimport lib\nprint(lib.VALUE)\n```"
+
+        dispatcher = _Auditor()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "lib.py").write_text("VALUE = 'ORIGINAL'\n")
+        tasks = [AgentTask(role="coder", prompt="write app.py",
+                           extract_to="app.py", run_check=True)]
+        # First run captures run_output with ORIGINAL.
+        # Then mutate the sibling before the audit-triggering run_goal
+        # step by monkeypatching check via direct call sequence:
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        assert "ORIGINAL" in tasks[0].run_output
+        # Sibling changes after the snapshot (as a repair round would).
+        (ws / "lib.py").write_text("VALUE = 'UPDATED'\n")
+        asyncio.run(orch._refresh_run_outputs(result, str(ws)))
+        assert "UPDATED" in tasks[0].run_output
+
+    def test_failed_rerun_recorded_as_evidence(self, tmp_path):
+        from towel.config import TowelConfig
+
+        class _Coder:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return "```python\nimport lib\nprint(lib.VALUE)\n```"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Coder())
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "lib.py").write_text("VALUE = 1\n")
+        tasks = [AgentTask(role="coder", prompt="x",
+                           extract_to="app.py", run_check=True)]
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        # Sibling breaks; the refresh records the failure instead of
+        # keeping the stale success output.
+        (ws / "lib.py").write_text("raise RuntimeError('broken dep')\n")
+        asyncio.run(orch._refresh_run_outputs(result, str(ws)))
+        assert "exited" in tasks[0].run_output
+        assert "broken dep" in tasks[0].run_output
+
+
+class TestSiblingImportRace:
+    def test_run_check_waits_for_sibling_producing_missing_module(self):
+        """Entry point executed before its library exists must wait for
+        the sibling task and re-run — not burn retries regenerating a
+        file that was never the problem."""
+        from towel.config import TowelConfig
+
+        class _TwoWorkers:
+            def __init__(self) -> None:
+                self.attempts_main = 0
+
+            def available_worker_count(self) -> int:
+                return 2
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if "write lib.py" in prompt:
+                    # Slow library: the entry point's run_check fires
+                    # first and hits ModuleNotFoundError.
+                    await asyncio.sleep(1.5)
+                    return "```python\nVALUE = 42\n```"
+                self.attempts_main += 1
+                return "```python\nimport lib\nprint(lib.VALUE)\n```"
+
+        dispatcher = _TwoWorkers()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        import tempfile
+        with tempfile.TemporaryDirectory() as ws:
+            tasks = [
+                AgentTask(role="coder", prompt="write lib.py",
+                          extract_to="lib.py"),
+                AgentTask(role="coder", prompt="write app.py",
+                          extract_to="app.py", run_check=True),
+            ]
+            result = asyncio.run(orch.run_parallel("g", tasks, workspace_dir=ws))
+        assert result.success
+        # ONE generation of app.py — the wait-and-rerun absorbed the
+        # race instead of a retry regenerating the file.
+        assert dispatcher.attempts_main == 1
+        assert tasks[1].run_output == "42\n"
+
+    def test_sibling_name_error_fails_fast_without_retry(self, tmp_path):
+        """`cannot import name X from sibling` can't be fixed by
+        regenerating THIS file — one attempt, immediate failure, blame
+        assigned to the sibling in the result for the repair planner."""
+        from towel.config import TowelConfig
+
+        class _Coder:
+            def __init__(self) -> None:
+                self.app_generations = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if "write lib.py" in prompt:
+                    # Library missing the name app.py needs.
+                    return "```python\ndef add(a, b):\n    return a + b\n```"
+                self.app_generations += 1
+                return (
+                    "```python\nfrom lib import subtract\n"
+                    "print(subtract(7, 2))\n```"
+                )
+
+        dispatcher = _Coder()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=3)
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        tasks = [
+            AgentTask(role="coder", prompt="write lib.py", extract_to="lib.py"),
+            AgentTask(role="coder", prompt="write app.py",
+                      extract_to="app.py", run_check=True, depends_on=[0]),
+        ]
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert not result.success
+        assert tasks[1].status == "failed"
+        # Only ONE generation despite max_attempts=3.
+        assert dispatcher.app_generations == 1
+        assert tasks[1].attempts == 1
+        # Blame routed to the sibling for the repair planner.
+        assert "lib.py must be corrected" in tasks[1].result
