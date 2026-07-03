@@ -7155,7 +7155,10 @@ class GatewayServer:
                     ...
                   ],
                   "parallel": false,      // optional, run independent tasks together
-                  "verify": false         // optional, default verify for every task
+                  "verify": false,        // optional, default verify for every task
+                  "goal_check": false,    // optional, audit the outcome vs the goal
+                  "repair": false         // optional (implies goal_check): one
+                                          // adaptive repair round on audit gaps
                 }
 
             Each subtask is dispatched to the best-fit worker via the
@@ -7194,6 +7197,18 @@ class GatewayServer:
             if not isinstance(verify_all_raw, bool):
                 return JSONResponse(
                     {"error": "verify must be a boolean"}, status_code=400,
+                )
+            repair_raw = body.get("repair", False)
+            if not isinstance(repair_raw, bool):
+                return JSONResponse(
+                    {"error": "repair must be a boolean"}, status_code=400,
+                )
+            # repair without an audit has nothing to react to, so it
+            # implies goal_check rather than erroring.
+            goal_check_raw = body.get("goal_check", False) or repair_raw
+            if not isinstance(goal_check_raw, bool):
+                return JSONResponse(
+                    {"error": "goal_check must be a boolean"}, status_code=400,
                 )
 
             raw_tasks = body.get("tasks")
@@ -7391,14 +7406,14 @@ class GatewayServer:
                         status_code=502,
                     )
             try:
-                if parallel:
-                    result = await orch.run_parallel(
-                        goal, tasks, workspace_dir=workspace_dir,
-                    )
-                else:
-                    result = await orch.run(
-                        goal, tasks, workspace_dir=workspace_dir,
-                    )
+                result = await orch.run_goal(
+                    goal, tasks,
+                    workspace_dir=workspace_dir,
+                    parallel=parallel,
+                    goal_check=goal_check_raw,
+                    repair=repair_raw,
+                    verify=verify_all_raw,
+                )
             except Exception as exc:
                 log.exception("orchestrator run failed: %s", exc)
                 return JSONResponse(
@@ -7409,6 +7424,9 @@ class GatewayServer:
                 "goal": goal,
                 "success": result.success,
                 "planned": auto_plan,
+                "goal_achieved": result.goal_achieved,
+                "goal_feedback": result.goal_feedback,
+                "repair_tasks_added": result.repair_tasks_added,
                 "total_elapsed_ms": round(result.total_elapsed * 1000.0, 1),
                 "workspace_dir": workspace_dir,
                 "synthesis": result.synthesis,

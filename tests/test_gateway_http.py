@@ -5321,3 +5321,66 @@ class TestOrchestrateRunCheck:
         assert data["success"] is True
         assert data["tasks"][0]["run_check"] is True
         assert data["tasks"][0]["run_output"] == "live\n"
+
+
+class TestOrchestrateGoalCheck:
+    def test_goal_check_surfaces_verdict(self, gateway, client):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            if role == "reviewer":
+                return "VERDICT: ACHIEVED"
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+            "goal_check": True,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["goal_achieved"] is True
+        assert data["repair_tasks_added"] == 0
+
+    def test_repair_implies_goal_check(self, gateway, client):
+        calls: list[str] = []
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            calls.append(role)
+            if role == "reviewer":
+                return "VERDICT: ACHIEVED"
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+            "repair": True,
+        })
+        assert resp.status_code == 200
+        # The audit ran even though goal_check wasn't set explicitly.
+        assert "reviewer" in calls
+        assert resp.json()["goal_achieved"] is True
+
+    def test_goal_check_absent_returns_null_verdict(self, gateway, client):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["goal_achieved"] is None

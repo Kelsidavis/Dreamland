@@ -154,6 +154,17 @@ class OrchestratorResult:
     tasks: list[AgentTask]
     synthesis: str = ""
     total_elapsed: float = 0.0
+    # Goal-level audit (run_goal with goal_check=True). Per-task verify
+    # checks each result against ITS OWN prompt; this checks the whole
+    # outcome against the GOAL — a plan can complete every task and
+    # still miss the goal. True = auditor says achieved, False = gaps
+    # found (listed in goal_feedback), None = audit not requested or
+    # the auditor was unavailable.
+    goal_achieved: bool | None = None
+    goal_feedback: str = ""
+    # Number of tasks appended by the adaptive repair round (repair=True
+    # and the first audit found gaps).
+    repair_tasks_added: int = 0
 
     @property
     def success(self) -> bool:
@@ -710,13 +721,28 @@ class Orchestrator:
         # planner-role subtask produced a write_file JSON blob where a
         # Python file was expected). "default" adds nothing over the
         # specific roles. Keep both out of the menu.
-        roles = ", ".join(
-            sorted(r for r in ROLE_PROMPTS if r not in ("default", "planner"))
-        )
         base_prompt = (
             f"Decompose the following goal into 1-{max_tasks} subtasks "
             "for specialist workers.\n\n"
             f"Goal: {goal}\n\n"
+            f"{self._plan_schema_guide()}"
+        )
+        return await self._plan_loop(base_prompt, label=goal[:60], verify=verify)
+
+    @staticmethod
+    def _plan_schema_guide() -> str:
+        """The JSON schema + rules block shared by every planning
+        prompt (initial decomposition and repair planning)."""
+        # "planner" is the internal role plan() itself dispatches as —
+        # its strict-JSON system prompt would make any subtask assigned
+        # to it emit JSON instead of real output (live observation: a
+        # planner-role subtask produced a write_file JSON blob where a
+        # Python file was expected). "default" adds nothing over the
+        # specific roles. Keep both out of the menu.
+        roles = ", ".join(
+            sorted(r for r in ROLE_PROMPTS if r not in ("default", "planner"))
+        )
+        return (
             f"Available roles: {roles}.\n\n"
             "Respond with ONLY a JSON array — no prose, no markdown "
             "outside the JSON. Each element:\n"
@@ -755,6 +781,16 @@ class Orchestrator:
             "that one file's contents.\n"
             "- Prefer a few substantial tasks over many small ones."
         )
+
+    async def _plan_loop(
+        self,
+        base_prompt: str,
+        *,
+        label: str,
+        verify: bool,
+    ) -> list[AgentTask]:
+        """Dispatch a planning prompt and parse the result, retrying
+        with the validation error fed back on a malformed plan."""
         feedback: str | None = None
         last_exc: Exception | None = None
         for _attempt in range(self.max_attempts):
@@ -778,7 +814,7 @@ class Orchestrator:
                 # attempt but don't add feedback — the model never saw
                 # this prompt fail.
                 last_exc = exc
-                log.warning("plan(%r): dispatch failed, retrying: %s", goal[:60], exc)
+                log.warning("plan(%r): dispatch failed, retrying: %s", label, exc)
                 continue
             try:
                 tasks = self._parse_plan(text)
@@ -787,7 +823,7 @@ class Orchestrator:
                 last_exc = exc
                 log.warning(
                     "plan(%r): invalid plan, retrying: %s — raw response: %r",
-                    goal[:60], exc, text[:400],
+                    label, exc, text[:400],
                 )
                 continue
             if verify:
@@ -795,7 +831,7 @@ class Orchestrator:
                     t.verify = True
             log.info(
                 "plan(%r): %d tasks (%s)",
-                goal[:60], len(tasks), [t.role for t in tasks],
+                label, len(tasks), [t.role for t in tasks],
             )
             return tasks
         raise ValueError(
@@ -850,10 +886,20 @@ class Orchestrator:
             deps: list[int] = []
             for d in deps_raw:
                 if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d < i:
-                    raise ValueError(
-                        f"tasks[{i}].depends_on contains {d!r} — entries "
-                        f"must be integer indices of EARLIER tasks (0..{i - 1})"
+                    # Drop, don't reject. Repair planners in particular
+                    # reference the PREVIOUS run's task indices (live:
+                    # depends_on=[4] in a 1-task repair plan, repeated
+                    # through every feedback retry — the reference is
+                    # semantically meaningful to the model, so feedback
+                    # can't train it away). Prompts are required to be
+                    # self-contained, so a dropped dep costs context
+                    # enrichment, not correctness.
+                    log.info(
+                        "plan: dropping invalid depends_on %r on tasks[%d] "
+                        "— must reference an earlier task in THIS plan",
+                        d, i,
                     )
+                    continue
                 deps.append(d)
             extract_to = entry.get("extract_to")
             if extract_to is not None:
@@ -900,19 +946,26 @@ class Orchestrator:
         # One writer per file. Live observation: a 7B planner gave five
         # of seven tasks extract_to=prime.py, each silently clobbering
         # the previous version — the shipped file was whichever task
-        # happened to run last. (Hand-authored plans via the API may
-        # still overwrite deliberately; this rule is planner-only.)
+        # happened to run last. Demote later duplicates to no-file
+        # tasks (they still read the file via depends_on) instead of
+        # rejecting: planners repeat this despite the guidance, and
+        # rejection was observed to burn every retry. Hand-authored
+        # plans via the API may still overwrite deliberately; this
+        # normalization is planner-only.
         seen_targets: dict[str, int] = {}
         for i, t in enumerate(tasks):
             if not t.extract_to:
                 continue
-            if t.extract_to in seen_targets:
-                raise ValueError(
-                    f"tasks[{i}].extract_to={t.extract_to!r} is already "
-                    f"produced by tasks[{seen_targets[t.extract_to]}] — "
-                    "each file must be written by exactly one task; "
-                    "downstream tasks read it via depends_on"
+            first = seen_targets.get(t.extract_to)
+            if first is not None:
+                log.info(
+                    "plan: tasks[%d] (%s) duplicates extract_to=%r from "
+                    "tasks[%d] — demoting to a no-file task",
+                    i, t.role, t.extract_to, first,
                 )
+                t.extract_to = None
+                t.run_check = False
+                continue
             seen_targets[t.extract_to] = i
         return tasks
 
@@ -1045,6 +1098,249 @@ class Orchestrator:
 
         result.total_elapsed = time.perf_counter() - start
         self._synthesize(goal, result)
+        return result
+
+    @staticmethod
+    def _orchestration_summary(
+        result: OrchestratorResult, workspace_dir: str | None,
+    ) -> str:
+        """Compact ground-truth digest of an orchestration for the
+        goal auditor and the repair planner: per-task status, artifact
+        paths, ACTUAL execution output where available, and result
+        excerpts."""
+        lines: list[str] = []
+        for i, t in enumerate(result.tasks):
+            line = f"- task {i} ({t.role}): {t.status}"
+            if t.extract_to:
+                line += f", wrote {t.extract_to}"
+            lines.append(line)
+            if t.run_output is not None:
+                lines.append(
+                    f"  actual execution output: {t.run_output[:400]!r}"
+                )
+            if t.result:
+                lines.append(f"  result excerpt: {t.result[:300]}")
+        if workspace_dir:
+            from pathlib import Path
+            ws = Path(workspace_dir)
+            if ws.is_dir():
+                files = sorted(
+                    str(p.relative_to(ws))
+                    for p in ws.rglob("*") if p.is_file()
+                )[:40]
+                if files:
+                    lines.append(f"Workspace files: {', '.join(files)}")
+        return "\n".join(lines)
+
+    async def check_goal(
+        self,
+        goal: str,
+        result: OrchestratorResult,
+        workspace_dir: str | None,
+    ) -> tuple[bool | None, str]:
+        """Audit the whole orchestration outcome against the goal.
+
+        Per-task ``verify`` asks "did this subtask follow ITS prompt?";
+        this asks "taken together, did the run achieve THE GOAL?" — a
+        plan can complete every task and still miss the goal (wrong
+        file name, a requirement no subtask covered, an artifact whose
+        actual output contradicts the spec).
+
+        Returns ``(True, "")`` on an ACHIEVED verdict, ``(False,
+        gaps)`` on INCOMPLETE, and ``(None, note)`` when the auditor is
+        unavailable or gives no parseable verdict — same fail-open
+        stance as `_verify_result`: a flaky auditor must not sink a
+        finished orchestration.
+        """
+        import re
+        summary = self._orchestration_summary(result, workspace_dir)
+        prompt = (
+            "You are auditing whether a multi-agent orchestration "
+            "achieved its goal.\n\n"
+            f"Goal: {goal}\n\n"
+            f"What actually happened:\n{summary}\n\n"
+            "Judge ONLY against the stated goal. Actual execution "
+            "output outweighs any claims in result excerpts. Reply "
+            "with exactly one line: 'VERDICT: ACHIEVED' or 'VERDICT: "
+            "INCOMPLETE — <each concrete gap and which file/task it "
+            "concerns>'."
+        )
+        try:
+            text = await self._run_agent("reviewer", prompt)
+        except Exception as exc:
+            log.warning("check_goal: auditor unavailable: %s", exc)
+            return None, f"goal audit unavailable: {exc}"
+        match = re.search(r"VERDICT:\s*(ACHIEVED|INCOMPLETE)", text, re.IGNORECASE)
+        if match is None:
+            log.warning(
+                "check_goal: no parseable verdict: %r", text[:120],
+            )
+            return None, "goal audit returned no parseable verdict"
+        if match.group(1).upper() == "ACHIEVED":
+            return True, ""
+        gaps = text[match.end():].strip(" -—:\n") or "no gaps listed"
+        return False, gaps[:1500]
+
+    @staticmethod
+    def _current_file_contents(
+        result: OrchestratorResult,
+        workspace_dir: str | None,
+        *,
+        limit_files: int = 4,
+        limit_chars: int = 2500,
+    ) -> str:
+        """Trimmed current contents of the files this orchestration
+        extracted — the repair planner and repair workers must ground
+        their fixes in what is ACTUALLY on disk, not in stale result
+        excerpts."""
+        if not workspace_dir:
+            return ""
+        from pathlib import Path
+        blocks: list[str] = []
+        seen: set[str] = set()
+        for t in result.tasks:
+            if not t.extract_to or t.extract_to in seen:
+                continue
+            seen.add(t.extract_to)
+            p = Path(workspace_dir) / t.extract_to
+            if not p.is_file():
+                continue
+            body = p.read_text(encoding="utf-8", errors="replace")[:limit_chars]
+            blocks.append(
+                f"Current contents of {t.extract_to}:\n```\n{body}\n```"
+            )
+            if len(blocks) >= limit_files:
+                break
+        return "\n\n".join(blocks)
+
+    async def plan_repair(
+        self,
+        goal: str,
+        gaps: str,
+        result: OrchestratorResult,
+        *,
+        workspace_dir: str | None = None,
+        max_tasks: int = 4,
+        verify: bool = False,
+    ) -> list[AgentTask]:
+        """Generate a short, targeted plan that fixes the audited gaps.
+
+        The repair planner sees the goal, the audit's gap list, the
+        ground-truth digest (statuses, artifacts, real execution
+        output), and the CURRENT contents of extracted files — so it
+        patches what is actually broken instead of re-planning the
+        whole goal from scratch. Each repair task that rewrites a file
+        also gets that file's current contents injected as context,
+        because repair prompts can't rely on depends_on: the previous
+        run's tasks aren't in this plan's index space.
+
+        Repair tasks MAY rewrite existing files: the one-writer-per-
+        file rule holds within a single plan, not across rounds.
+        """
+        summary = self._orchestration_summary(result, workspace_dir)
+        files_block = self._current_file_contents(result, workspace_dir)
+        base_prompt = (
+            "A multi-agent orchestration ran but did NOT fully achieve "
+            "its goal. Produce a SHORT repair plan of 1-"
+            f"{max_tasks} subtasks that fixes ONLY the gaps below — do "
+            "not redo work that already succeeded.\n\n"
+            f"Goal: {goal}\n\n"
+            f"Gaps found by the auditor:\n{gaps}\n\n"
+            f"What already happened:\n{summary}\n\n"
+            + (f"{files_block}\n\n" if files_block else "")
+            + "A repair task that rewrites an existing file must produce "
+            "the COMPLETE corrected file, not a diff. Repair tasks run "
+            "fresh — they cannot depend_on tasks from the previous "
+            "run, so each prompt must carry everything the worker "
+            "needs.\n\n"
+            f"{self._plan_schema_guide()}"
+        )
+        tasks = await self._plan_loop(
+            base_prompt, label=f"repair:{goal[:48]}", verify=verify,
+        )
+        # Ground each file-rewriting repair task in the file's current
+        # contents — its prompt was written by a planner that saw them,
+        # but the worker executing it won't have, and depends_on can't
+        # bridge runs.
+        if workspace_dir:
+            from pathlib import Path
+            for t in tasks:
+                if not t.extract_to:
+                    continue
+                p = Path(workspace_dir) / t.extract_to
+                if p.is_file():
+                    body = p.read_text(
+                        encoding="utf-8", errors="replace",
+                    )[:4000]
+                    t.context = (
+                        f"Current contents of {t.extract_to} (rewrite "
+                        f"this file completely):\n```\n{body}\n```\n"
+                        + t.context
+                    )
+        return tasks
+
+    async def run_goal(
+        self,
+        goal: str,
+        tasks: list[AgentTask],
+        *,
+        workspace_dir: str | None = None,
+        parallel: bool = False,
+        goal_check: bool = False,
+        repair: bool = False,
+        verify: bool = False,
+    ) -> OrchestratorResult:
+        """Execute tasks, optionally audit the outcome against the
+        goal, and optionally run one adaptive repair round.
+
+        The full follow-through pipeline:
+
+        1. run / run_parallel (per-task retries, validation, verify,
+           run_check all apply as configured on the tasks)
+        2. goal_check: a reviewer-role audit of the WHOLE outcome
+        3. repair (requires goal_check): if the audit found gaps, ask
+           the planner for a targeted repair plan, execute it in the
+           same workspace, and re-audit once
+
+        One repair round only — a goal the fleet can't reach in two
+        audited passes needs a human (or a better goal), not an
+        unbounded loop burning workers.
+        """
+        runner = self.run_parallel if parallel else self.run
+        result = await runner(goal, tasks, workspace_dir=workspace_dir)
+        if not goal_check:
+            return result
+
+        start_check = time.perf_counter()
+        achieved, feedback = await self.check_goal(goal, result, workspace_dir)
+        result.goal_achieved = achieved
+        result.goal_feedback = feedback
+
+        if repair and achieved is False:
+            log.info("run_goal: audit found gaps, planning repair: %s",
+                     feedback[:200])
+            try:
+                repair_tasks = await self.plan_repair(
+                    goal, feedback, result,
+                    workspace_dir=workspace_dir, verify=verify,
+                )
+            except ValueError as exc:
+                result.goal_feedback += f"\n(repair planning failed: {exc})"
+                result.total_elapsed += time.perf_counter() - start_check
+                return result
+            await runner(goal, repair_tasks, workspace_dir=workspace_dir)
+            result.tasks.extend(repair_tasks)
+            result.repair_tasks_added = len(repair_tasks)
+            achieved, feedback = await self.check_goal(
+                goal, result, workspace_dir,
+            )
+            result.goal_achieved = achieved
+            result.goal_feedback = feedback
+            # Re-synthesize over the full task list (initial + repair).
+            result.synthesis = ""
+            self._synthesize(goal, result)
+
+        result.total_elapsed += time.perf_counter() - start_check
         return result
 
     async def _run_agent(

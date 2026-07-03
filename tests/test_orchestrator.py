@@ -960,10 +960,12 @@ class TestPlan:
         with pytest.raises(ValueError, match="no valid plan"):
             asyncio.run(orch.plan("g"))
 
-    def test_plan_rejects_forward_dependencies(self):
-        """depends_on must reference EARLIER tasks only — a forward
-        reference would deadlock nothing (waves handle any DAG) but is
-        almost always a planner hallucination, so it retries."""
+    def test_plan_drops_invalid_dependencies(self):
+        """Out-of-range / forward depends_on entries are dropped, not
+        rejected — repair planners reference the previous run's task
+        indices and repeat them through every feedback retry (live),
+        so rejection deadlocks planning. Prompts are self-contained by
+        rule, so a dropped dep costs context, not correctness."""
         from towel.config import TowelConfig
 
         class _Forward:
@@ -975,18 +977,18 @@ class TestPlan:
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
                 self.count += 1
-                if self.count == 1:
-                    return (
-                        '[{"role": "coder", "prompt": "a", "depends_on": [1]},'
-                        ' {"role": "coder", "prompt": "b"}]'
-                    )
-                return '[{"role": "coder", "prompt": "a"}]'
+                return (
+                    '[{"role": "coder", "prompt": "a", "depends_on": [4]},'
+                    ' {"role": "coder", "prompt": "b", "depends_on": [0]}]'
+                )
 
         dispatcher = _Forward()
         orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
-        assert len(tasks) == 1
-        assert dispatcher.count == 2
+        assert dispatcher.count == 1
+        assert tasks[0].depends_on == []
+        # Valid in-plan deps survive.
+        assert tasks[1].depends_on == [0]
 
     def test_plan_verify_flag_applies_to_all_tasks(self):
         from towel.config import TowelConfig
@@ -1139,10 +1141,14 @@ class TestRunCheck:
         assert tasks[0].run_check is False
         assert dispatcher.count == 1
 
-    def test_plan_rejects_duplicate_extract_targets(self):
+    def test_plan_demotes_duplicate_extract_targets(self):
+        """Planners give several tasks the same extract_to despite the
+        guidance; later duplicates lose extract_to/run_check instead of
+        failing the plan (rejection burned every retry live) — the
+        first writer wins, dependents read via depends_on."""
         from towel.config import TowelConfig
 
-        class _DupThenGood:
+        class _Dup:
             def __init__(self) -> None:
                 self.count = 0
 
@@ -1151,19 +1157,23 @@ class TestRunCheck:
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
                 self.count += 1
-                if self.count == 1:
-                    return (
-                        '[{"role": "coder", "prompt": "a", "extract_to": "x.py"},'
-                        ' {"role": "reviewer", "prompt": "b",'
-                        ' "extract_to": "x.py", "depends_on": [0]}]'
-                    )
-                return '[{"role": "coder", "prompt": "a", "extract_to": "x.py"}]'
+                return (
+                    '[{"role": "coder", "prompt": "a", "extract_to": "x.py",'
+                    ' "run_check": true},'
+                    ' {"role": "reviewer", "prompt": "b",'
+                    ' "extract_to": "x.py", "run_check": true,'
+                    ' "depends_on": [0]}]'
+                )
 
-        dispatcher = _DupThenGood()
+        dispatcher = _Dup()
         orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
-        assert len(tasks) == 1
-        assert dispatcher.count == 2
+        assert dispatcher.count == 1
+        assert len(tasks) == 2
+        assert tasks[0].extract_to == "x.py"
+        assert tasks[0].run_check is True
+        assert tasks[1].extract_to is None
+        assert tasks[1].run_check is False
 
     def test_plan_tolerates_empty_extract_to(self):
         """Planners echo the schema with "" for no-file tasks — that
@@ -1184,3 +1194,222 @@ class TestRunCheck:
         tasks = asyncio.run(orch.plan("g"))
         assert tasks[0].extract_to is None
         assert tasks[1].extract_to == "x.py"
+
+
+class TestGoalCheckAndRepair:
+    """run_goal audits the WHOLE outcome against the goal and, with
+    repair=True, runs one adaptive repair round on audit gaps —
+    per-task verify can pass every subtask while the goal is missed."""
+
+    def test_goal_check_achieved(self):
+        from towel.config import TowelConfig
+
+        class _Auditor:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.calls.append({"role": role, "prompt": prompt})
+                if role == "reviewer":
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _Auditor()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="do x")]
+        result = asyncio.run(orch.run_goal(
+            "the goal", tasks, goal_check=True,
+        ))
+        assert result.goal_achieved is True
+        assert result.goal_feedback == ""
+        assert result.repair_tasks_added == 0
+        audit = dispatcher.calls[-1]
+        assert audit["role"] == "reviewer"
+        assert "the goal" in audit["prompt"]
+        # The audit prompt carries the ground-truth digest.
+        assert "task 0 (coder)" in audit["prompt"]
+
+    def test_goal_check_off_by_default(self):
+        from towel.config import TowelConfig
+        dispatcher = _RecordingDispatcher()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal("g", tasks))
+        assert result.goal_achieved is None
+        # No reviewer dispatch happened.
+        assert all(c["role"] == "coder" for c in dispatcher.calls)
+
+    def test_repair_round_fixes_gaps(self, tmp_path):
+        """INCOMPLETE audit → planner produces a repair task → it runs
+        → second audit passes."""
+        from towel.config import TowelConfig
+
+        class _World:
+            def __init__(self) -> None:
+                self.audits = 0
+                self.roles: list[str] = []
+                self.repair_prompt: str | None = None
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.roles.append(role)
+                if role == "reviewer":
+                    self.audits += 1
+                    if self.audits == 1:
+                        return "VERDICT: INCOMPLETE — missing goodbye() in app.py"
+                    return "VERDICT: ACHIEVED"
+                if role == "planner":
+                    self.repair_prompt = prompt
+                    return (
+                        '[{"role": "coder", "prompt": "add goodbye() to '
+                        'app.py, produce the complete file",'
+                        ' "extract_to": "app.py"}]'
+                    )
+                return "```python\ndef goodbye():\n    return 'bye'\n```"
+
+        dispatcher = _World()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="write app.py")]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run_goal(
+            "app.py with hello() and goodbye()", tasks,
+            workspace_dir=str(ws), goal_check=True, repair=True,
+        ))
+        assert result.goal_achieved is True
+        assert result.repair_tasks_added == 1
+        assert len(result.tasks) == 2
+        assert result.tasks[1].extract_to == "app.py"
+        assert result.tasks[1].status == "completed"
+        # Repair planner saw the audit gaps and the ground truth.
+        assert "goodbye" in dispatcher.repair_prompt
+        assert "task 0 (coder)" in dispatcher.repair_prompt
+        # coder, audit, planner, repair-coder, audit
+        assert dispatcher.audits == 2
+
+    def test_repair_not_run_when_achieved(self):
+        from towel.config import TowelConfig
+
+        class _HappyAuditor:
+            def __init__(self) -> None:
+                self.planner_called = False
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "planner":
+                    self.planner_called = True
+                if role == "reviewer":
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _HappyAuditor()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal(
+            "g", tasks, goal_check=True, repair=True,
+        ))
+        assert result.goal_achieved is True
+        assert dispatcher.planner_called is False
+
+    def test_auditor_unavailable_fails_open(self):
+        from towel.agent.orchestrator import WorkerDispatchError
+        from towel.config import TowelConfig
+
+        class _NoAuditor:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    raise WorkerDispatchError("no worker")
+                return "done"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_NoAuditor())
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal(
+            "g", tasks, goal_check=True, repair=True,
+        ))
+        # Unknown verdict: no repair attempted, tasks stand.
+        assert result.goal_achieved is None
+        assert result.repair_tasks_added == 0
+        assert result.success
+
+    def test_repair_planning_failure_keeps_first_audit(self):
+        from towel.config import TowelConfig
+
+        class _BrokenPlanner:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    return "VERDICT: INCOMPLETE — gap X"
+                if role == "planner":
+                    return "utter nonsense"
+                return "done"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_BrokenPlanner(), max_attempts=1)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal(
+            "g", tasks, goal_check=True, repair=True,
+        ))
+        assert result.goal_achieved is False
+        assert "gap X" in result.goal_feedback
+        assert "repair planning failed" in result.goal_feedback
+        assert result.repair_tasks_added == 0
+
+    def test_repair_tasks_grounded_in_current_file_contents(self, tmp_path):
+        """A repair task rewriting a file must receive that file's
+        CURRENT contents — depends_on can't bridge runs."""
+        from towel.config import TowelConfig
+
+        class _World:
+            def __init__(self) -> None:
+                self.audits = 0
+                self.coder_prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    self.audits += 1
+                    if self.audits == 1:
+                        return "VERDICT: INCOMPLETE — app.py lacks goodbye()"
+                    return "VERDICT: ACHIEVED"
+                if role == "planner":
+                    # The planner prompt must include the current file.
+                    assert "MARKER_ORIGINAL_HELLO" in prompt
+                    return (
+                        '[{"role": "coder", "prompt": "rewrite app.py '
+                        'with hello() and goodbye()",'
+                        ' "extract_to": "app.py"}]'
+                    )
+                self.coder_prompts.append(prompt)
+                return (
+                    "```python\ndef hello():\n    return 'MARKER_ORIGINAL_HELLO'\n"
+                    "def goodbye():\n    return 'bye'\n```"
+                )
+
+        dispatcher = _World()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="write app.py",
+                           extract_to="app.py")]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run_goal(
+            "app.py with hello() and goodbye()", tasks,
+            workspace_dir=str(ws), goal_check=True, repair=True,
+        ))
+        assert result.goal_achieved is True
+        assert result.repair_tasks_added == 1
+        # The repair coder saw the file it was rewriting.
+        assert "MARKER_ORIGINAL_HELLO" in dispatcher.coder_prompts[-1]
+        assert "Current contents of app.py" in dispatcher.coder_prompts[-1]

@@ -2182,6 +2182,14 @@ def ask(
     help="Reviewer-check every subtask result against its instructions.",
 )
 @click.option(
+    "--goal-check", "goal_check", is_flag=True,
+    help="Audit the finished orchestration against the goal.",
+)
+@click.option(
+    "--repair", is_flag=True,
+    help="On audit gaps, run one adaptive repair round (implies --goal-check).",
+)
+@click.option(
     "--json", "as_json", is_flag=True,
     help="Print raw JSON response instead of formatted output.",
 )
@@ -2193,6 +2201,8 @@ def orchestrate(
     parallel: bool,
     max_attempts: int,
     verify: bool,
+    goal_check: bool,
+    repair: bool,
     as_json: bool,
 ) -> None:
     """Dispatch a multi-worker piecemeal orchestration.
@@ -2230,6 +2240,10 @@ def orchestrate(
             body["max_attempts"] = max_attempts
         if verify:
             body["verify"] = True
+        if goal_check:
+            body["goal_check"] = True
+        if repair:
+            body["repair"] = True
     else:
         if goal is None:
             console.print("[red]Either PLAN_FILE or --goal is required.[/red]")
@@ -2244,6 +2258,10 @@ def orchestrate(
             }
             if verify:
                 body["verify"] = True
+            if goal_check:
+                body["goal_check"] = True
+            if repair:
+                body["repair"] = True
             if workspace_dir:
                 body["workspace_dir"] = workspace_dir
             console.print(
@@ -2286,6 +2304,10 @@ def orchestrate(
         }
         if verify:
             body["verify"] = True
+        if goal_check:
+            body["goal_check"] = True
+        if repair:
+            body["repair"] = True
         if workspace_dir:
             body["workspace_dir"] = workspace_dir
 
@@ -2327,9 +2349,18 @@ def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
     )
     if data.get("planned"):
         header += f"\nplan: auto-generated ({len(data.get('tasks', []))} tasks)"
+    goal_achieved = data.get("goal_achieved")
+    if goal_achieved is True:
+        header += "\ngoal audit: [green]ACHIEVED[/green]"
+    elif goal_achieved is False:
+        header += "\ngoal audit: [red]INCOMPLETE[/red]"
+    if data.get("repair_tasks_added"):
+        header += f" (after {data['repair_tasks_added']} repair task(s))"
     if data.get("workspace_dir"):
         header += f"\nworkspace: {data['workspace_dir']}"
     console.print(Panel(header, title="Towel Orchestrate", border_style=status_color))
+    if goal_achieved is False and data.get("goal_feedback"):
+        console.print(f"[red]gaps:[/red] {data['goal_feedback'][:400]}")
 
     for i, t in enumerate(data.get("tasks", [])):
         icon = {
