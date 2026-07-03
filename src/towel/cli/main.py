@@ -2194,6 +2194,13 @@ def ask(
     help="On audit gaps, run one adaptive repair round (implies --goal-check).",
 )
 @click.option(
+    "--watch", is_flag=True,
+    help=(
+        "Run in the background and stream live task progress instead "
+        "of blocking on one long request."
+    ),
+)
+@click.option(
     "--json", "as_json", is_flag=True,
     help="Print raw JSON response instead of formatted output.",
 )
@@ -2202,11 +2209,12 @@ def orchestrate(
     goal: str | None,
     tasks: tuple[str, ...],
     workspace_dir: str | None,
-    parallel: bool,
+    parallel: bool | None,
     max_attempts: int,
     verify: bool,
     goal_check: bool,
     repair: bool,
+    watch: bool,
     as_json: bool,
 ) -> None:
     """Dispatch a multi-worker piecemeal orchestration.
@@ -2273,7 +2281,10 @@ def orchestrate(
                 "[dim]No --task specs given — the fleet will plan the "
                 "subtasks itself.[/dim]"
             )
-            _post_orchestrate(url, body, as_json)
+            if watch:
+                _watch_orchestrate(url, body, as_json)
+            else:
+                _post_orchestrate(url, body, as_json)
             return
         parsed_tasks: list[dict[str, Any]] = []
         for spec in tasks:
@@ -2317,7 +2328,58 @@ def orchestrate(
         if workspace_dir:
             body["workspace_dir"] = workspace_dir
 
-    _post_orchestrate(url, body, as_json)
+    if watch:
+        _watch_orchestrate(url, body, as_json)
+    else:
+        _post_orchestrate(url, body, as_json)
+
+
+def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
+    """Submit the orchestration in background mode and render live
+    progress from GET /api/orchestrate/<id> until it finishes."""
+    import time as time_mod
+
+    import httpx
+
+    body = dict(body)
+    body["background"] = True
+    try:
+        resp = httpx.post(url, json=body, timeout=60)
+    except httpx.RequestError as exc:
+        console.print(f"[red]Gateway request failed:[/red] {exc}")
+        console.print("Is the gateway running? Try: towel serve")
+        sys.exit(1)
+    if resp.status_code != 202:
+        console.print(f"[red]Gateway returned {resp.status_code}:[/red] {resp.text}")
+        sys.exit(1)
+    oid = resp.json()["orchestration_id"]
+    status_url = f"{url}/{oid}"
+    console.print(f"[dim]orchestration {oid} started — watching…[/dim]")
+
+    last_line = ""
+    while True:
+        time_mod.sleep(2)
+        try:
+            data = httpx.get(status_url, timeout=30).json()
+        except httpx.RequestError as exc:
+            console.print(f"[red]status poll failed:[/red] {exc}")
+            sys.exit(1)
+        tasks = data.get("tasks", [])
+        done = sum(1 for t in tasks if t.get("status") == "completed")
+        active = [
+            t.get("role", "?") for t in tasks if t.get("status") == "running"
+        ]
+        line = (
+            f"{data.get('state')}: {done}/{len(tasks)} tasks done"
+            + (f" — running: {', '.join(active)}" if active else "")
+            + ("" if tasks else " (planning…)")
+        )
+        if line != last_line:
+            console.print(f"[dim]{line}[/dim]")
+            last_line = line
+        if data.get("state") != "running":
+            _render_orchestration(data, as_json)
+            return
 
 
 def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
@@ -2326,8 +2388,6 @@ def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
     Shared by all three `towel orchestrate` modes (plan file, --task
     specs, goal-only auto-plan) so the output format stays identical.
     """
-    import json as json_mod
-
     import httpx
 
     try:
@@ -2341,7 +2401,13 @@ def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
         console.print(f"[red]Gateway returned {resp.status_code}:[/red] {resp.text}")
         sys.exit(1)
 
-    data = resp.json()
+    _render_orchestration(resp.json(), as_json)
+
+
+def _render_orchestration(data: dict[str, Any], as_json: bool) -> None:
+    """Render a finished orchestration response."""
+    import json as json_mod
+
     if as_json:
         console.print(json_mod.dumps(data, indent=2))
         return

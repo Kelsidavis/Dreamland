@@ -223,6 +223,11 @@ class GatewayServer:
     _manual_tasks: dict[str, list[TaskType]] = field(default_factory=dict)
     _idle_manager: IdleTaskManager = field(default_factory=IdleTaskManager)
     _dispatcher: Dispatcher | None = None
+    # Background orchestrations (POST /api/orchestrate {"background":
+    # true}): id → job record with the live AgentTask list (statuses
+    # mutate in place, so GET /api/orchestrate/<id> shows real-time
+    # progress), the asyncio.Task driving it, and the final result.
+    _orchestrations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._session_pins = self.pin_store.load()
@@ -2820,6 +2825,56 @@ class GatewayServer:
                 or getattr(self.config.model, "name", "")
             ),
             "tools": needs_tools,
+        }
+
+    def _orchestration_response(
+        self,
+        goal: str,
+        tasks: list[Any],
+        workspace_dir: str | None,
+        auto_plan: bool,
+        *,
+        state: str,
+        result: Any = None,
+    ) -> dict[str, Any]:
+        """Response body shared by the synchronous /api/orchestrate
+        path and the background status endpoint. ``result`` is None
+        while a background run is still executing — task statuses are
+        live either way, goal-audit fields settle when it finishes."""
+        return {
+            "goal": goal,
+            "state": state,
+            "success": result.success if result is not None else None,
+            "planned": auto_plan,
+            "goal_achieved": result.goal_achieved if result is not None else None,
+            "goal_feedback": result.goal_feedback if result is not None else "",
+            "repair_tasks_added": (
+                result.repair_tasks_added if result is not None else 0
+            ),
+            "total_elapsed_ms": (
+                round(result.total_elapsed * 1000.0, 1)
+                if result is not None else None
+            ),
+            "workspace_dir": workspace_dir,
+            "synthesis": result.synthesis if result is not None else "",
+            "tasks": [
+                {
+                    "role": t.role,
+                    "prompt": t.prompt,
+                    "depends_on": t.depends_on,
+                    "with_tools": t.with_tools,
+                    "extract_to": t.extract_to,
+                    "extracted_path": t.extracted_path,
+                    "status": t.status,
+                    "elapsed_ms": round(t.elapsed * 1000.0, 1),
+                    "attempts": t.attempts,
+                    "verified": t.verified,
+                    "run_check": t.run_check,
+                    "run_output": t.run_output,
+                    "result": t.result,
+                }
+                for t in tasks
+            ],
         }
 
     def available_worker_count(self) -> int:
@@ -7404,6 +7459,12 @@ class GatewayServer:
                     status_code=400,
                 )
 
+            background = body.get("background", False)
+            if not isinstance(background, bool):
+                return JSONResponse(
+                    {"error": "background must be a boolean"}, status_code=400,
+                )
+
             orch = Orchestrator(
                 config=self.config,
                 skills=getattr(self.agent, "skills", None),
@@ -7411,66 +7472,131 @@ class GatewayServer:
                 dispatcher=self,
                 max_attempts=max_attempts_raw,
             )
-            if auto_plan:
+
+            if not background:
+                if auto_plan:
+                    try:
+                        tasks = await orch.plan(goal, verify=verify_all_raw)
+                    except ValueError as exc:
+                        # Planner exhausted its retries without a valid
+                        # plan — a fleet/model problem, not a caller error.
+                        return JSONResponse(
+                            {"error": f"auto-plan failed: {_err_str(exc)}"},
+                            status_code=502,
+                        )
+                    except Exception as exc:
+                        log.exception("auto-plan failed: %s", exc)
+                        return JSONResponse(
+                            {"error": f"auto-plan failed: {_err_str(exc)}"},
+                            status_code=502,
+                        )
                 try:
-                    tasks = await orch.plan(goal, verify=verify_all_raw)
-                except ValueError as exc:
-                    # Planner exhausted its retries without a valid
-                    # plan — a fleet/model problem, not a caller error.
-                    return JSONResponse(
-                        {"error": f"auto-plan failed: {_err_str(exc)}"},
-                        status_code=502,
+                    result = await orch.run_goal(
+                        goal, tasks,
+                        workspace_dir=workspace_dir,
+                        parallel=parallel,
+                        goal_check=goal_check_raw,
+                        repair=repair_raw,
+                        verify=verify_all_raw,
                     )
                 except Exception as exc:
-                    log.exception("auto-plan failed: %s", exc)
+                    log.exception("orchestrator run failed: %s", exc)
                     return JSONResponse(
-                        {"error": f"auto-plan failed: {_err_str(exc)}"},
-                        status_code=502,
+                        {"error": _err_str(exc)}, status_code=500,
                     )
-            try:
-                result = await orch.run_goal(
-                    goal, tasks,
-                    workspace_dir=workspace_dir,
-                    parallel=parallel,
-                    goal_check=goal_check_raw,
-                    repair=repair_raw,
-                    verify=verify_all_raw,
-                )
-            except Exception as exc:
-                log.exception("orchestrator run failed: %s", exc)
-                return JSONResponse(
-                    {"error": _err_str(exc)}, status_code=500,
-                )
+                return JSONResponse(self._orchestration_response(
+                    goal, result.tasks, workspace_dir, auto_plan,
+                    state="completed", result=result,
+                ))
 
-            return JSONResponse({
+            # Background: return an id immediately; GET
+            # /api/orchestrate/<id> reads live progress off the same
+            # AgentTask list the run mutates.
+            oid = uuid.uuid4().hex[:12]
+            job: dict[str, Any] = {
                 "goal": goal,
-                "success": result.success,
-                "planned": auto_plan,
-                "goal_achieved": result.goal_achieved,
-                "goal_feedback": result.goal_feedback,
-                "repair_tasks_added": result.repair_tasks_added,
-                "total_elapsed_ms": round(result.total_elapsed * 1000.0, 1),
+                "tasks": tasks,           # empty until auto-plan finishes
                 "workspace_dir": workspace_dir,
-                "synthesis": result.synthesis,
-                "tasks": [
-                    {
-                        "role": t.role,
-                        "prompt": t.prompt,
-                        "depends_on": t.depends_on,
-                        "with_tools": t.with_tools,
-                        "extract_to": t.extract_to,
-                        "extracted_path": t.extracted_path,
-                        "status": t.status,
-                        "elapsed_ms": round(t.elapsed * 1000.0, 1),
-                        "attempts": t.attempts,
-                        "verified": t.verified,
-                        "run_check": t.run_check,
-                        "run_output": t.run_output,
-                        "result": t.result,
-                    }
-                    for t in result.tasks
-                ],
-            })
+                "auto_plan": auto_plan,
+                "state": "running",
+                "error": None,
+                "result": None,
+                "started_at": time.monotonic(),
+            }
+
+            async def _drive() -> None:
+                try:
+                    run_tasks = job["tasks"]
+                    if auto_plan:
+                        run_tasks = await orch.plan(goal, verify=verify_all_raw)
+                        job["tasks"] = run_tasks
+                    job["result"] = await orch.run_goal(
+                        goal, run_tasks,
+                        workspace_dir=workspace_dir,
+                        parallel=parallel,
+                        goal_check=goal_check_raw,
+                        repair=repair_raw,
+                        verify=verify_all_raw,
+                    )
+                    job["state"] = "completed"
+                except asyncio.CancelledError:
+                    job["state"] = "cancelled"
+                    raise
+                except Exception as exc:
+                    log.exception("background orchestration %s failed: %s", oid, exc)
+                    job["state"] = "failed"
+                    job["error"] = _err_str(exc)
+
+            job["task"] = asyncio.create_task(_drive())
+            self._orchestrations[oid] = job
+            # Bound the registry: evict oldest FINISHED jobs past 50.
+            if len(self._orchestrations) > 50:
+                for old_id, old_job in list(self._orchestrations.items()):
+                    if old_job["state"] != "running":
+                        del self._orchestrations[old_id]
+                    if len(self._orchestrations) <= 50:
+                        break
+            return JSONResponse(
+                {
+                    "orchestration_id": oid,
+                    "state": "running",
+                    "status_url": f"/api/orchestrate/{oid}",
+                },
+                status_code=202,
+            )
+
+        async def api_orchestrate_status(request: Request) -> JSONResponse:
+            """GET /api/orchestrate/<id> — live progress of a background
+            orchestration. DELETE cancels it.
+
+            The task list in the response updates in real time (the
+            scheduler mutates task statuses in place); goal-audit
+            fields appear once the run finishes.
+            """
+            oid = request.path_params["oid"]
+            job = self._orchestrations.get(oid)
+            if job is None:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r}"},
+                    status_code=404,
+                )
+            if request.method == "DELETE":
+                if job["state"] == "running":
+                    job["task"].cancel()
+                    job["state"] = "cancelled"
+                return JSONResponse({"orchestration_id": oid, "state": job["state"]})
+            resp = self._orchestration_response(
+                job["goal"], job["tasks"], job["workspace_dir"],
+                job["auto_plan"], state=job["state"], result=job["result"],
+            )
+            resp["orchestration_id"] = oid
+            if job["error"]:
+                resp["error"] = job["error"]
+            if job["state"] == "running":
+                resp["elapsed_ms"] = round(
+                    (time.monotonic() - job["started_at"]) * 1000.0, 1,
+                )
+            return JSONResponse(resp)
 
         async def api_sessions(request: Request) -> JSONResponse:
             """GET /api/sessions — list active and stored sessions with tags.
@@ -7641,6 +7767,11 @@ class GatewayServer:
             Route("/admin/restart", admin_restart, methods=["POST"]),
             Route("/api/ask", simple_ask, methods=["POST"]),
             Route("/api/orchestrate", api_orchestrate, methods=["POST"]),
+            Route(
+                "/api/orchestrate/{oid}",
+                api_orchestrate_status,
+                methods=["GET", "DELETE"],
+            ),
             Route("/api/sessions", api_sessions, methods=["GET"]),
             *openai_routes,
             *sse_routes,

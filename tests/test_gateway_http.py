@@ -5387,3 +5387,88 @@ class TestOrchestrateGoalCheck:
         })
         assert resp.status_code == 200
         assert resp.json()["goal_achieved"] is None
+
+
+class TestOrchestrateBackground:
+    """POST {"background": true} returns 202 + id immediately; GET
+    /api/orchestrate/<id> serves live progress; DELETE cancels."""
+
+    def test_background_lifecycle(self, gateway):
+        import time as _time
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            import asyncio
+            await asyncio.sleep(0.05)
+            return "done"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        # Context-managed client: keeps one event loop alive across
+        # requests so the background task survives between them (the
+        # plain per-request client tears its loop down, cancelling the
+        # task — production runs a single long-lived loop).
+        with TestClient(gateway._build_http_app()) as client:
+            resp = client.post("/api/orchestrate", json={
+                "goal": "g",
+                "background": True,
+                "tasks": [{"role": "coder", "prompt": "x"}],
+            })
+            assert resp.status_code == 202
+            oid = resp.json()["orchestration_id"]
+            assert resp.json()["status_url"] == f"/api/orchestrate/{oid}"
+
+            # Poll until finished (well under the 60s test timeout).
+            deadline = _time.monotonic() + 10
+            data = None
+            while _time.monotonic() < deadline:
+                data = client.get(f"/api/orchestrate/{oid}").json()
+                if data["state"] != "running":
+                    break
+                _time.sleep(0.05)
+            assert data is not None
+            assert data["state"] == "completed"
+            assert data["success"] is True
+            assert data["tasks"][0]["status"] == "completed"
+            assert data["orchestration_id"] == oid
+
+    def test_background_cancel(self, gateway):
+        async def slow_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            import asyncio
+            await asyncio.sleep(30)
+            return "never"
+
+        gateway.dispatch_role_task = slow_dispatch  # type: ignore[method-assign]
+
+        with TestClient(gateway._build_http_app()) as client:
+            resp = client.post("/api/orchestrate", json={
+                "goal": "g",
+                "background": True,
+                "tasks": [{"role": "coder", "prompt": "x"}],
+            })
+            assert resp.status_code == 202
+            oid = resp.json()["orchestration_id"]
+
+            cancel = client.delete(f"/api/orchestrate/{oid}")
+            assert cancel.status_code == 200
+            assert cancel.json()["state"] == "cancelled"
+            # Status endpoint agrees after cancellation.
+            assert client.get(f"/api/orchestrate/{oid}").json()["state"] == "cancelled"
+
+    def test_unknown_orchestration_id_404(self, client):
+        resp = client.get("/api/orchestrate/nope123")
+        assert resp.status_code == 404
+
+    def test_background_must_be_boolean(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "background": "yes",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        })
+        assert resp.status_code == 400
+        assert "background" in resp.json()["error"]

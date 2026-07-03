@@ -1566,3 +1566,56 @@ class TestReadinessScheduling:
         orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
         asyncio.run(orch.plan("g"))
         assert "CONCURRENTLY" not in dispatcher.prompts[0]
+
+
+class TestDiskTruthDepContext:
+    def test_dependent_sees_current_file_not_chat_blob(self, tmp_path):
+        """When a dependency wrote a file, the dependent's context
+        carries the file's CURRENT on-disk contents, not the raw chat
+        response (prose + possibly stale drafts)."""
+        from towel.config import TowelConfig
+
+        class _Coder:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if role == "coder":
+                    return (
+                        "Here is an early draft: DRAFT_MARKER\n"
+                        "```python\ndef final():\n    return 'FINAL_MARKER'\n```"
+                    )
+                return "reviewed"
+
+        dispatcher = _Coder()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="write mod.py", extract_to="mod.py"),
+            AgentTask(role="reviewer", prompt="review mod.py", depends_on=[0]),
+        ]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        reviewer_prompt = dispatcher.prompts[-1]
+        # The extracted file body is present…
+        assert "FINAL_MARKER" in reviewer_prompt
+        assert "current" in reviewer_prompt
+        # …and the chat prose around it is NOT.
+        assert "DRAFT_MARKER" not in reviewer_prompt
+
+    def test_dep_without_file_still_passes_result(self):
+        from towel.config import TowelConfig
+        dispatcher = _RecordingDispatcher()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="researcher", prompt="find facts"),
+            AgentTask(role="writer", prompt="write it up", depends_on=[0]),
+        ]
+        result = asyncio.run(orch.run("g", tasks))
+        assert result.success
+        assert "Result from researcher" in dispatcher.calls[1]["prompt"]

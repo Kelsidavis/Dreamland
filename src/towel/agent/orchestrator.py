@@ -666,21 +666,44 @@ class Orchestrator:
         if task.depends_on:
             dep_results = []
             for dep_idx in task.depends_on:
-                if dep_idx < len(tasks) and tasks[dep_idx].result:
-                    dep = tasks[dep_idx]
+                if not (0 <= dep_idx < len(tasks)):
+                    continue
+                dep = tasks[dep_idx]
+                file_body: str | None = None
+                if dep.extracted_path:
+                    # Disk truth beats the chat blob: the dependency's
+                    # canonical output is the file it wrote, not its
+                    # full response (prose + possibly stale code —
+                    # observed live: a dependent reproduced an earlier
+                    # draft from the result text instead of the
+                    # validated file). Read fresh each compose so a
+                    # repair-rewritten file propagates.
+                    from pathlib import Path
+                    p = Path(dep.extracted_path)
+                    if p.is_file():
+                        file_body = p.read_text(
+                            encoding="utf-8", errors="replace",
+                        )[:4000]
+                if file_body is not None:
+                    dep_results.append(
+                        f"[File {dep.extract_to} produced by "
+                        f"{dep.role} (task {dep_idx}) — current "
+                        f"contents]:\n```\n{file_body}\n```"
+                    )
+                elif dep.result:
                     dep_results.append(
                         f"[Result from {dep.role} (task {dep_idx})]:\n"
                         f"{dep.result}"
                     )
-                    # Ground-truth beats claims: when the dependency's
-                    # file was actually executed (run_check), give the
-                    # dependent the real program output too.
-                    if dep.run_output is not None:
-                        dep_results.append(
-                            f"[Actual execution output of "
-                            f"{dep.extract_to} (task {dep_idx})]:\n"
-                            f"{dep.run_output}"
-                        )
+                # Ground-truth beats claims: when the dependency's
+                # file was actually executed (run_check), give the
+                # dependent the real program output too.
+                if dep.run_output is not None:
+                    dep_results.append(
+                        f"[Actual execution output of "
+                        f"{dep.extract_to} (task {dep_idx})]:\n"
+                        f"{dep.run_output}"
+                    )
             if dep_results:
                 dep_context = "\n\n".join(dep_results) + "\n\n"
 
