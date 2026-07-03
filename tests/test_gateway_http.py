@@ -75,14 +75,82 @@ class TestOrchestrateEndpoint:
         assert resp.status_code == 400
         assert "goal" in resp.json()["error"]
 
-    def test_missing_tasks_rejected(self, client):
-        resp = client.post("/api/orchestrate", json={"goal": "g"})
+    def test_missing_tasks_auto_plans(self, gateway, client):
+        """Omitting `tasks` triggers auto-planning: an architect-role
+        dispatch produces the task list, which then executes normally."""
+        calls: list[dict] = []
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            calls.append({"role": role, "prompt": prompt})
+            if role == "architect" and len(calls) == 1:
+                return (
+                    '[{"role": "coder", "prompt": "write greet.py"},'
+                    ' {"role": "reviewer", "prompt": "check it",'
+                    ' "depends_on": [0]}]'
+                )
+            return f"<<{role} ok>>"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={"goal": "build a greeter"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["planned"] is True
+        assert data["success"] is True
+        assert [t["role"] for t in data["tasks"]] == ["coder", "reviewer"]
+        assert data["tasks"][1]["depends_on"] == [0]
+        # First dispatch was the planning call itself.
+        assert calls[0]["role"] == "architect"
+        assert "build a greeter" in calls[0]["prompt"]
+
+    def test_auto_plan_without_fleet_returns_502(self, client):
+        """No workers → the planner can't run; surfaced as a gateway
+        (fleet) problem, not a caller error."""
+        resp = client.post("/api/orchestrate", json={"goal": "g", "tasks": []})
+        assert resp.status_code == 502
+        assert "auto-plan failed" in resp.json()["error"]
+
+    def test_tasks_wrong_type_rejected(self, client):
+        resp = client.post("/api/orchestrate", json={"goal": "g", "tasks": "x"})
         assert resp.status_code == 400
         assert "tasks" in resp.json()["error"]
 
-    def test_empty_tasks_rejected(self, client):
-        resp = client.post("/api/orchestrate", json={"goal": "g", "tasks": []})
+    def test_verify_flag_triggers_reviewer_pass(self, gateway, client):
+        """`verify: true` on a task routes the completed result through
+        a reviewer-role dispatch; a PASS verdict marks it verified."""
+        calls: list[str] = []
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            calls.append(role)
+            if role == "reviewer":
+                return "VERDICT: PASS"
+            return "a greeting function"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "write it", "verify": True}],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["tasks"][0]["status"] == "completed"
+        assert data["tasks"][0]["verified"] is True
+        assert calls == ["coder", "reviewer"]
+
+    def test_verify_must_be_boolean(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x", "verify": "yes"}],
+        })
         assert resp.status_code == 400
+        assert "verify" in resp.json()["error"]
 
     def test_too_many_tasks_rejected(self, client):
         resp = client.post("/api/orchestrate", json={

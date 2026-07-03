@@ -43,6 +43,19 @@ class WorkerDispatchError(RuntimeError):
         self.worker_id = worker_id
 
 
+class TaskRejectedError(ValueError):
+    """Raised when a subtask's output failed validation or review.
+
+    Distinct from `WorkerDispatchError` (infrastructure failure — the
+    worker never produced usable output) because the remedy differs:
+    an infra failure retries the same prompt on a different worker,
+    while a rejection retries with the rejection reason appended so
+    the model can correct course instead of re-rolling blind.
+    Subclasses ValueError so callers that caught the extraction
+    ValueErrors keep working.
+    """
+
+
 class RoleDispatcher(Protocol):
     """Protocol the Orchestrator uses to dispatch a single role task.
 
@@ -98,6 +111,18 @@ class AgentTask:
     # Surfaced so operators reading the response body can see when the
     # cluster needed multiple workers to satisfy a request.
     attempts: int = 0
+    # When True, a reviewer-role worker checks the completed result
+    # against the task prompt before the task is marked completed. A
+    # FAIL verdict counts as a failed attempt and retries with the
+    # reviewer's reason appended to the prompt — this is the
+    # "follow-through" loop that keeps a plausible-but-wrong response
+    # from silently passing as done.
+    verify: bool = False
+    # True = reviewer passed the result. None = verification not
+    # requested, or the reviewer was unavailable / gave no parseable
+    # verdict (result accepted, unverified). False = the task
+    # terminally failed review — only seen alongside status="failed".
+    verified: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,6 +132,7 @@ class AgentTask:
             "elapsed": f"{self.elapsed:.1f}s",
             "result_length": len(self.result),
             "attempts": self.attempts,
+            "verified": self.verified,
         }
 
 
@@ -250,16 +276,34 @@ class Orchestrator:
         another attempt rather than leaving broken code on disk.
         Model-quality issues are often stochastic; re-rolling the
         same prompt frequently succeeds where the first try didn't.
+
+        Rejections (`TaskRejectedError` — syntax/substance validation or a
+        reviewer FAIL when ``task.verify`` is set) carry the reason
+        forward: the next attempt's prompt gets the rejection appended
+        so the model can fix the specific problem instead of
+        re-rolling blind. Infra failures (`WorkerDispatchError`) do
+        NOT add feedback — the model never saw the prompt fail, so
+        there's nothing for it to correct.
         """
         task_start = time.perf_counter()
         task.status = "running"
         last_exc: Exception | None = None
         exclude_workers: set[str] = set()
+        feedback: str | None = None
         for attempt in range(self.max_attempts):
             task.attempts = attempt + 1
+            attempt_prompt = full_prompt
+            if feedback:
+                attempt_prompt = (
+                    f"{full_prompt}\n\n"
+                    "[Your previous attempt was rejected]\n"
+                    f"{feedback}\n"
+                    "Produce a corrected response. Follow the task "
+                    "instructions exactly."
+                )
             try:
                 task.result = await self._run_agent(
-                    task.role, full_prompt,
+                    task.role, attempt_prompt,
                     with_tools=task.with_tools,
                     exclude_workers=exclude_workers,
                 )
@@ -268,9 +312,22 @@ class Orchestrator:
                 # the next retry rather than a terminal "failed" task.
                 if task.extract_to and workspace_dir:
                     self._extract_and_write(task, workspace_dir)
+                # Follow-through check runs last, against the fully
+                # validated result — no point reviewing output that
+                # already failed syntax validation.
+                if task.verify:
+                    await self._verify_result(task)
                 task.status = "completed"
                 last_exc = None
                 break
+            except TaskRejectedError as e:
+                last_exc = e
+                feedback = str(e)
+                log.warning(
+                    "Task (%s, attempt %d/%d) rejected: %s",
+                    task.role, attempt + 1, self.max_attempts, e,
+                )
+                await asyncio.sleep(0)
             except WorkerDispatchError as e:
                 last_exc = e
                 if e.worker_id:
@@ -352,7 +409,7 @@ class Orchestrator:
             try:
                 tree = ast.parse(body)
             except SyntaxError as exc:
-                raise ValueError(
+                raise TaskRejectedError(
                     f"extract_to wrote {target.name} but it has a "
                     f"SyntaxError on line {exc.lineno}: {exc.msg}"
                 ) from exc
@@ -386,11 +443,64 @@ class Orchestrator:
                 for node in tree.body
             )
             if not has_substance:
-                raise ValueError(
+                raise TaskRejectedError(
                     f"extract_to wrote {target.name} but it has no "
                     "substantive code (no def/class/assignment/import) — "
                     f"got {body[:80]!r}"
                 )
+
+    async def _verify_result(self, task: AgentTask) -> None:
+        """Ask a reviewer-role worker whether the result followed the
+        task instructions. Raises `TaskRejectedError` (with the reviewer's
+        reason) on a FAIL verdict so the retry loop re-prompts with
+        that feedback.
+
+        Best-effort by design: if the reviewer can't run (no worker
+        free) or returns no parseable verdict, the result is accepted
+        with ``task.verified = None`` rather than failing the task —
+        a flaky reviewer must not be able to kill otherwise-good work.
+        Only an explicit FAIL blocks completion.
+        """
+        import re
+        # Cap the excerpt so a long result doesn't blow the reviewer's
+        # context; the instruction-adherence signal is almost always in
+        # the first few thousand chars.
+        excerpt = (task.result or "")[:6000]
+        prompt = (
+            "You are verifying whether a completed subtask followed its "
+            "instructions.\n\n"
+            f"Instructions given to the worker:\n{task.prompt}\n\n"
+            f"Worker's output:\n---\n{excerpt}\n---\n\n"
+            "Did the output follow the instructions and accomplish the "
+            "task? Minor style differences are fine; missing "
+            "requirements, ignored constraints, or off-task output are "
+            "not. Reply with exactly one line: 'VERDICT: PASS' or "
+            "'VERDICT: FAIL — <what is wrong and what to fix>'."
+        )
+        try:
+            text = await self._run_agent("reviewer", prompt)
+        except Exception as exc:
+            log.warning(
+                "verify(%s): reviewer unavailable, accepting unverified: %s",
+                task.role, exc,
+            )
+            task.verified = None
+            return
+        match = re.search(r"VERDICT:\s*(PASS|FAIL)", text, re.IGNORECASE)
+        if match is None:
+            log.warning(
+                "verify(%s): no parseable verdict in reviewer response, "
+                "accepting unverified: %r",
+                task.role, text[:120],
+            )
+            task.verified = None
+            return
+        if match.group(1).upper() == "PASS":
+            task.verified = True
+            return
+        reason = text[match.end():].strip(" -—:\n") or "no reason given"
+        task.verified = False
+        raise TaskRejectedError(f"reviewer rejected the output: {reason[:500]}")
 
     @staticmethod
     def _workspace_preamble(workspace_dir: str | None) -> str:
@@ -412,6 +522,224 @@ class Orchestrator:
             "be avoided unless the goal explicitly requires it.\n\n"
         )
 
+    @staticmethod
+    def _failed_deps(task: AgentTask, tasks: list[AgentTask]) -> list[int]:
+        return [
+            d for d in task.depends_on
+            if 0 <= d < len(tasks) and tasks[d].status in ("failed", "skipped")
+        ]
+
+    @staticmethod
+    def _mark_skipped(task: AgentTask, failed_deps: list[int]) -> None:
+        """Short-circuit when a direct dependency didn't succeed.
+
+        Without this, the dependent runs with the failed dep's error
+        string injected as `Result from <role>` context — the worker
+        either reasons against a misleading "result" or wastes time
+        refusing the prompt. Marking the task `skipped` makes the
+        failure cascade visible in the response and saves the worker
+        turn.
+        """
+        task.status = "skipped"
+        task.result = (
+            f"Skipped: depends on task(s) {failed_deps} which did "
+            "not complete successfully."
+        )
+        task.elapsed = 0.0
+        task.attempts = 0
+
+    @staticmethod
+    def _compose_prompt(
+        goal: str,
+        task: AgentTask,
+        tasks: list[AgentTask],
+        workspace_preamble: str,
+    ) -> str:
+        """Build a subtask's full prompt: workspace directive, results
+        from its dependencies, injected context, then goal + task."""
+        dep_context = ""
+        if task.depends_on:
+            dep_results = []
+            for dep_idx in task.depends_on:
+                if dep_idx < len(tasks) and tasks[dep_idx].result:
+                    dep_results.append(
+                        f"[Result from {tasks[dep_idx].role} (task {dep_idx})]:\n"
+                        f"{tasks[dep_idx].result}"
+                    )
+            if dep_results:
+                dep_context = "\n\n".join(dep_results) + "\n\n"
+
+        full_prompt = workspace_preamble
+        if dep_context:
+            full_prompt += f"Context from previous tasks:\n{dep_context}\n"
+        if task.context:
+            full_prompt += f"{task.context}\n\n"
+        full_prompt += f"Goal: {goal}\n\nYour task: {task.prompt}"
+        return full_prompt
+
+    def _synthesize(self, goal: str, result: OrchestratorResult) -> None:
+        if result.success and len(result.tasks) > 1:
+            synthesis_parts = [f"# Results for: {goal}\n"]
+            for i, t in enumerate(result.tasks):
+                synthesis_parts.append(f"## {t.role.title()} (Task {i})\n{t.result}\n")
+            result.synthesis = "\n".join(synthesis_parts)
+
+    async def plan(
+        self,
+        goal: str,
+        *,
+        max_tasks: int = 8,
+        verify: bool = False,
+    ) -> list[AgentTask]:
+        """Decompose a goal into an executable task list — no
+        hand-authored plan required.
+
+        Dispatches an architect-role subtask that returns a JSON plan,
+        then validates it with the same rules the API enforces. A
+        malformed plan retries with the validation error appended, so
+        the planner model gets to correct its own output instead of
+        the orchestration dying on the first bad comma.
+
+        The plan guidance bakes in the fleet's known-good recipe:
+        chat-fast subtasks with `extract_to` for code files (one fenced
+        block, no prose) rather than the tool loop.
+
+        Raises ValueError when no valid plan emerges after
+        `self.max_attempts` tries.
+        """
+        roles = ", ".join(sorted(r for r in ROLE_PROMPTS if r != "default"))
+        base_prompt = (
+            f"Decompose the following goal into 1-{max_tasks} subtasks "
+            "for specialist workers.\n\n"
+            f"Goal: {goal}\n\n"
+            f"Available roles: {roles}.\n\n"
+            "Respond with ONLY a JSON array — no prose, no markdown "
+            "outside the JSON. Each element:\n"
+            "{\n"
+            '  "role": "<role>",\n'
+            '  "prompt": "<complete, self-contained instructions>",\n'
+            '  "depends_on": [<indices of earlier tasks whose output '
+            "this task needs>],\n"
+            '  "extract_to": "<relative file path — ONLY for tasks '
+            'that must produce a code file>"\n'
+            "}\n\n"
+            "Rules:\n"
+            "- Each prompt must be self-contained: the worker sees only "
+            "its prompt plus the outputs of its depends_on tasks — "
+            "nothing else.\n"
+            "- For a task that produces a code file, set extract_to and "
+            "instruct the worker to answer with ONE fenced code block "
+            "and no prose.\n"
+            "- depends_on may only reference earlier tasks (smaller "
+            "index). Omit it or use [] for independent tasks.\n"
+            "- Prefer a few substantial tasks over many small ones."
+        )
+        feedback: str | None = None
+        last_exc: Exception | None = None
+        for _attempt in range(self.max_attempts):
+            prompt = base_prompt
+            if feedback:
+                prompt = (
+                    f"{base_prompt}\n\n"
+                    "[Your previous plan was rejected]\n"
+                    f"{feedback}\n"
+                    "Return a corrected JSON array."
+                )
+            text = await self._run_agent("architect", prompt)
+            try:
+                tasks = self._parse_plan(text)
+            except ValueError as exc:
+                feedback = str(exc)
+                last_exc = exc
+                log.warning("plan(%r): invalid plan, retrying: %s", goal[:60], exc)
+                continue
+            if verify:
+                for t in tasks:
+                    t.verify = True
+            log.info(
+                "plan(%r): %d tasks (%s)",
+                goal[:60], len(tasks), [t.role for t in tasks],
+            )
+            return tasks
+        raise ValueError(
+            f"planner produced no valid plan after {self.max_attempts} "
+            f"attempts: {last_exc}"
+        )
+
+    @staticmethod
+    def _parse_plan(text: str) -> list[AgentTask]:
+        """Parse and validate a planner response into AgentTasks.
+
+        Tolerates the JSON arriving inside a fenced block or surrounded
+        by prose — grabs the outermost array. Raises ValueError with a
+        model-actionable message on any structural problem; `plan()`
+        feeds that message back for the retry.
+        """
+        import json
+        import re
+
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        candidate = match.group(1) if match else text
+        start = candidate.find("[")
+        end = candidate.rfind("]")
+        if start == -1 or end <= start:
+            raise ValueError("response contains no JSON array")
+        try:
+            raw = json.loads(candidate[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON: {exc}") from exc
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("plan must be a non-empty JSON array")
+        if len(raw) > 32:
+            raise ValueError("plan must have 32 tasks or fewer")
+
+        tasks: list[AgentTask] = []
+        for i, entry in enumerate(raw):
+            if not isinstance(entry, dict):
+                raise ValueError(f"tasks[{i}] must be a JSON object")
+            role = entry.get("role")
+            if role not in ROLE_PROMPTS:
+                raise ValueError(
+                    f"tasks[{i}].role={role!r} is unknown; valid roles: "
+                    f"{sorted(ROLE_PROMPTS)}"
+                )
+            prompt = entry.get("prompt")
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise ValueError(f"tasks[{i}].prompt must be a non-empty string")
+            deps_raw = entry.get("depends_on") or []
+            if not isinstance(deps_raw, list):
+                raise ValueError(f"tasks[{i}].depends_on must be a list")
+            deps: list[int] = []
+            for d in deps_raw:
+                if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d < i:
+                    raise ValueError(
+                        f"tasks[{i}].depends_on contains {d!r} — entries "
+                        f"must be integer indices of EARLIER tasks (0..{i - 1})"
+                    )
+                deps.append(d)
+            extract_to = entry.get("extract_to")
+            if extract_to is not None:
+                if not isinstance(extract_to, str) or not extract_to.strip():
+                    raise ValueError(
+                        f"tasks[{i}].extract_to must be a non-empty string"
+                    )
+                if ".." in extract_to.split("/"):
+                    raise ValueError(
+                        f"tasks[{i}].extract_to must not contain '..'"
+                    )
+                extract_to = extract_to.strip()
+            with_tools = entry.get("with_tools", False)
+            if not isinstance(with_tools, bool):
+                raise ValueError(f"tasks[{i}].with_tools must be a boolean")
+            tasks.append(AgentTask(
+                role=role,
+                prompt=prompt.strip(),
+                depends_on=deps,
+                with_tools=with_tools,
+                extract_to=extract_to,
+            ))
+        return tasks
+
     async def run(
         self,
         goal: str,
@@ -428,51 +756,18 @@ class Orchestrator:
         workspace_preamble = self._workspace_preamble(workspace_dir)
 
         for i, task in enumerate(tasks):
-            # Short-circuit when a direct dependency didn't succeed.
-            # Without this, the dependent runs with the failed dep's
-            # error string injected as `Result from <role>` context —
-            # the worker either reasons against a misleading "result"
-            # or wastes time refusing the prompt. Marking the task
-            # `skipped` makes the failure cascade visible in the
-            # response and saves the worker turn.
-            failed_deps = [
-                d for d in task.depends_on
-                if 0 <= d < len(tasks) and tasks[d].status in ("failed", "skipped")
-            ]
+            failed_deps = self._failed_deps(task, tasks)
             if failed_deps:
-                task.status = "skipped"
-                task.result = (
-                    f"Skipped: depends on task(s) {failed_deps} which did "
-                    "not complete successfully."
-                )
-                task.elapsed = 0.0
-                task.attempts = 0
+                self._mark_skipped(task, failed_deps)
                 log.info(
                     "Task %d (%s): skipped (failed deps %s)",
                     i, task.role, failed_deps,
                 )
                 continue
 
-            # Inject dependency results as context
-            dep_context = ""
-            if task.depends_on:
-                dep_results = []
-                for dep_idx in task.depends_on:
-                    if dep_idx < len(tasks) and tasks[dep_idx].result:
-                        dep_results.append(
-                            f"[Result from {tasks[dep_idx].role} (task {dep_idx})]:\n"
-                            f"{tasks[dep_idx].result}"
-                        )
-                if dep_results:
-                    dep_context = "\n\n".join(dep_results) + "\n\n"
-
-            # Build the agent prompt
-            full_prompt = workspace_preamble
-            if dep_context:
-                full_prompt += f"Context from previous tasks:\n{dep_context}\n"
-            if task.context:
-                full_prompt += f"{task.context}\n\n"
-            full_prompt += f"Goal: {goal}\n\nYour task: {task.prompt}"
+            full_prompt = self._compose_prompt(
+                goal, task, tasks, workspace_preamble,
+            )
 
             # Execute (extract-and-validate happens INSIDE the retry
             # loop when extract_to is set, so a syntax-error in the
@@ -487,14 +782,7 @@ class Orchestrator:
             )
 
         result.total_elapsed = time.perf_counter() - start
-
-        # Synthesize results
-        if result.success and len(tasks) > 1:
-            synthesis_parts = [f"# Results for: {goal}\n"]
-            for i, t in enumerate(tasks):
-                synthesis_parts.append(f"## {t.role.title()} (Task {i})\n{t.result}\n")
-            result.synthesis = "\n".join(synthesis_parts)
-
+        self._synthesize(goal, result)
         return result
 
     async def run_parallel(
@@ -504,21 +792,83 @@ class Orchestrator:
         *,
         workspace_dir: str | None = None,
     ) -> OrchestratorResult:
-        """Execute independent tasks in parallel."""
+        """Execute tasks in dependency-aware parallel waves.
+
+        Each wave runs every still-pending task whose dependencies have
+        all completed — independent tasks fan out across the fleet
+        simultaneously while dependents wait for their inputs and get
+        the same dependency-context injection the sequential path does.
+        Previously this method ignored `depends_on` entirely, so
+        `parallel=true` silently broke collaboration: dependents raced
+        their dependencies and saw none of their output.
+
+        Tasks whose dependencies failed are skipped (same cascade as
+        `run`). Tasks left pending when no wave can make progress —
+        only possible with a dependency cycle — are skipped too, with
+        the cycle called out in the result.
+        """
         start = time.perf_counter()
+        result = OrchestratorResult(tasks=tasks)
         workspace_preamble = self._workspace_preamble(workspace_dir)
 
-        async def _exec(i: int, task: AgentTask) -> None:  # noqa: ARG001
-            full_prompt = (
-                f"{workspace_preamble}Goal: {goal}\n\nYour task: {task.prompt}"
+        log.info(
+            f"Orchestrating {len(tasks)} tasks (parallel waves) for: {goal[:80]}"
+        )
+
+        async def _exec(i: int, task: AgentTask) -> None:
+            full_prompt = self._compose_prompt(
+                goal, task, tasks, workspace_preamble,
             )
             await self._execute_with_retry(
                 task, full_prompt, workspace_dir=workspace_dir,
             )
+            log.info(
+                "Task %d (%s): %s in %.1fs (attempts=%d)",
+                i, task.role, task.status, task.elapsed, task.attempts,
+            )
 
-        await asyncio.gather(*[_exec(i, t) for i, t in enumerate(tasks)])
+        wave = 0
+        while True:
+            # Cascade skips first so a wave never launches a task whose
+            # dependency just failed in the previous wave.
+            for i, task in enumerate(tasks):
+                if task.status != "pending":
+                    continue
+                failed_deps = self._failed_deps(task, tasks)
+                if failed_deps:
+                    self._mark_skipped(task, failed_deps)
+                    log.info(
+                        "Task %d (%s): skipped (failed deps %s)",
+                        i, task.role, failed_deps,
+                    )
 
-        result = OrchestratorResult(tasks=tasks, total_elapsed=time.perf_counter() - start)
+            ready = [
+                i for i, task in enumerate(tasks)
+                if task.status == "pending"
+                and all(
+                    tasks[d].status == "completed"
+                    for d in task.depends_on
+                    if 0 <= d < len(tasks)
+                )
+            ]
+            if not ready:
+                break
+            wave += 1
+            log.info("Parallel wave %d: tasks %s", wave, ready)
+            await asyncio.gather(*[_exec(i, tasks[i]) for i in ready])
+
+        # Anything still pending here has an unresolvable dependency
+        # graph (a cycle) — surface that instead of looping forever.
+        for task in tasks:
+            if task.status == "pending":
+                task.status = "skipped"
+                task.result = (
+                    "Skipped: unresolvable dependencies (dependency cycle "
+                    f"involving depends_on={task.depends_on})."
+                )
+
+        result.total_elapsed = time.perf_counter() - start
+        self._synthesize(goal, result)
         return result
 
     async def _run_agent(

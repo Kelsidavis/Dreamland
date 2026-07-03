@@ -7143,22 +7143,30 @@ class GatewayServer:
 
                 {
                   "goal": "...",          // required, the overall objective
-                  "tasks": [              // required, 1..32 entries
+                  "tasks": [              // optional — omit to auto-plan
                     {
                       "role": "architect",          // see ROLE_PROMPTS
                       "prompt": "...",              // what this subtask does
-                      "depends_on": [0, 1]          // optional, indices into tasks
+                      "depends_on": [0, 1],         // optional, indices into tasks
+                      "verify": true                // optional, reviewer checks result
                     },
                     ...
                   ],
-                  "parallel": false       // optional, run independent tasks together
+                  "parallel": false,      // optional, run independent tasks together
+                  "verify": false         // optional, default verify for every task
                 }
 
             Each subtask is dispatched to the best-fit worker via the
-            normal routing pipeline. With ``parallel=true`` independent
-            subtasks fan out across the fleet simultaneously — the
-            whole point of the system. Returns per-task results plus a
-            synthesis.
+            normal routing pipeline. With ``parallel=true`` tasks run
+            in dependency-aware waves — independent subtasks fan out
+            across the fleet simultaneously, which is the whole point
+            of the system. Returns per-task results plus a synthesis.
+
+            When ``tasks`` is omitted (or empty), an architect-role
+            worker decomposes the goal into a plan first and the
+            response carries ``"planned": true`` plus the generated
+            task list — so a caller can orchestrate from nothing but a
+            goal.
             """
             from towel.agent.orchestrator import (
                 ROLE_PROMPTS,
@@ -7180,22 +7188,34 @@ class GatewayServer:
                 return JSONResponse({"error": "goal is required"}, status_code=400)
             goal = goal.strip()
 
-            raw_tasks = body.get("tasks")
-            if not isinstance(raw_tasks, list) or not raw_tasks:
+            verify_all_raw = body.get("verify", False)
+            if not isinstance(verify_all_raw, bool):
                 return JSONResponse(
-                    {"error": "tasks must be a non-empty list"}, status_code=400,
+                    {"error": "verify must be a boolean"}, status_code=400,
+                )
+
+            raw_tasks = body.get("tasks")
+            # Omitted/empty tasks → auto-plan: an architect-role worker
+            # decomposes the goal into the task list (validated by the
+            # orchestrator with the same rules as below). Explicitly
+            # wrong types still 400.
+            auto_plan = raw_tasks is None or raw_tasks == []
+            if not auto_plan and not isinstance(raw_tasks, list):
+                return JSONResponse(
+                    {"error": "tasks must be a list (omit to auto-plan)"},
+                    status_code=400,
                 )
             # Cap at 32 to prevent a single request from monopolizing
             # the fleet — orchestrations beyond that scale should be
             # split into multiple /api/orchestrate calls.
-            if len(raw_tasks) > 32:
+            if not auto_plan and len(raw_tasks) > 32:
                 return JSONResponse(
                     {"error": "tasks list must have 32 entries or fewer"},
                     status_code=400,
                 )
 
             tasks: list[AgentTask] = []
-            for i, raw in enumerate(raw_tasks):
+            for i, raw in enumerate(raw_tasks or []):
                 if not isinstance(raw, dict):
                     return JSONResponse(
                         {"error": f"tasks[{i}] must be an object"},
@@ -7266,12 +7286,19 @@ class GatewayServer:
                             status_code=400,
                         )
                     extract_to_val = extract_to_raw.strip()
+                verify_raw = raw.get("verify", verify_all_raw)
+                if not isinstance(verify_raw, bool):
+                    return JSONResponse(
+                        {"error": f"tasks[{i}].verify must be a boolean"},
+                        status_code=400,
+                    )
                 tasks.append(AgentTask(
                     role=role,
                     prompt=prompt.strip(),
                     depends_on=deps,
                     with_tools=with_tools_raw,
                     extract_to=extract_to_val,
+                    verify=verify_raw,
                 ))
 
             parallel = bool(body.get("parallel", False))
@@ -7330,6 +7357,22 @@ class GatewayServer:
                 dispatcher=self,
                 max_attempts=max_attempts_raw,
             )
+            if auto_plan:
+                try:
+                    tasks = await orch.plan(goal, verify=verify_all_raw)
+                except ValueError as exc:
+                    # Planner exhausted its retries without a valid
+                    # plan — a fleet/model problem, not a caller error.
+                    return JSONResponse(
+                        {"error": f"auto-plan failed: {_err_str(exc)}"},
+                        status_code=502,
+                    )
+                except Exception as exc:
+                    log.exception("auto-plan failed: %s", exc)
+                    return JSONResponse(
+                        {"error": f"auto-plan failed: {_err_str(exc)}"},
+                        status_code=502,
+                    )
             try:
                 if parallel:
                     result = await orch.run_parallel(
@@ -7348,6 +7391,7 @@ class GatewayServer:
             return JSONResponse({
                 "goal": goal,
                 "success": result.success,
+                "planned": auto_plan,
                 "total_elapsed_ms": round(result.total_elapsed * 1000.0, 1),
                 "workspace_dir": workspace_dir,
                 "synthesis": result.synthesis,
@@ -7362,6 +7406,7 @@ class GatewayServer:
                         "status": t.status,
                         "elapsed_ms": round(t.elapsed * 1000.0, 1),
                         "attempts": t.attempts,
+                        "verified": t.verified,
                         "result": t.result,
                     }
                     for t in result.tasks

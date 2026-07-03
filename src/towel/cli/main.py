@@ -2178,6 +2178,10 @@ def ask(
     help="Retry count per subtask (1=no retry, default 2).",
 )
 @click.option(
+    "--verify", is_flag=True,
+    help="Reviewer-check every subtask result against its instructions.",
+)
+@click.option(
     "--json", "as_json", is_flag=True,
     help="Print raw JSON response instead of formatted output.",
 )
@@ -2188,14 +2192,16 @@ def orchestrate(
     workspace_dir: str | None,
     parallel: bool,
     max_attempts: int,
+    verify: bool,
     as_json: bool,
 ) -> None:
     """Dispatch a multi-worker piecemeal orchestration.
 
     \b
-    Two modes:
+    Three modes:
       towel orchestrate plan.json
       towel orchestrate --goal "build x" --task "coder:write x.py+tools" --workspace /tmp/ws
+      towel orchestrate --goal "build x"     (no --task: the fleet plans the subtasks itself)
 
     \b
     Task spec format (for --task):
@@ -2204,8 +2210,6 @@ def orchestrate(
       role:prompt@1,2+tools    depends on 1 and 2, enable tool-loop
     """
     import json as json_mod
-
-    import httpx
 
     config = TowelConfig.load()
     url = f"http://{config.gateway.host}:{config.gateway.port + 1}/api/orchestrate"
@@ -2224,13 +2228,30 @@ def orchestrate(
             body["parallel"] = True
         if max_attempts != 2:
             body["max_attempts"] = max_attempts
+        if verify:
+            body["verify"] = True
     else:
         if goal is None:
             console.print("[red]Either PLAN_FILE or --goal is required.[/red]")
             sys.exit(1)
         if not tasks:
-            console.print("[red]At least one --task is required when not using a plan file.[/red]")
-            sys.exit(1)
+            # No --task specs: send the goal alone and let the gateway
+            # auto-plan the subtask list with an architect worker.
+            body = {
+                "goal": goal,
+                "parallel": parallel,
+                "max_attempts": max_attempts,
+            }
+            if verify:
+                body["verify"] = True
+            if workspace_dir:
+                body["workspace_dir"] = workspace_dir
+            console.print(
+                "[dim]No --task specs given — the fleet will plan the "
+                "subtasks itself.[/dim]"
+            )
+            _post_orchestrate(url, body, as_json)
+            return
         parsed_tasks: list[dict[str, Any]] = []
         for spec in tasks:
             # Parse role:prompt[@deps][+tools]
@@ -2263,8 +2284,23 @@ def orchestrate(
             "parallel": parallel,
             "max_attempts": max_attempts,
         }
+        if verify:
+            body["verify"] = True
         if workspace_dir:
             body["workspace_dir"] = workspace_dir
+
+    _post_orchestrate(url, body, as_json)
+
+
+def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
+    """POST an orchestration body to the gateway and render the result.
+
+    Shared by all three `towel orchestrate` modes (plan file, --task
+    specs, goal-only auto-plan) so the output format stays identical.
+    """
+    import json as json_mod
+
+    import httpx
 
     try:
         resp = httpx.post(url, json=body, timeout=None)
@@ -2289,6 +2325,8 @@ def orchestrate(
         f"orchestration: {data.get('goal', '')}\n"
         f"total: {total_ms / 1000.0:.1f}s"
     )
+    if data.get("planned"):
+        header += f"\nplan: auto-generated ({len(data.get('tasks', []))} tasks)"
     if data.get("workspace_dir"):
         header += f"\nworkspace: {data['workspace_dir']}"
     console.print(Panel(header, title="Towel Orchestrate", border_style=status_color))
@@ -2304,9 +2342,10 @@ def orchestrate(
         attempts = t.get("attempts", 1)
         attempts_note = f" (attempts={attempts})" if attempts > 1 else ""
         tools_note = " [tools]" if t.get("with_tools") else ""
+        verified_note = " [green]✔ verified[/green]" if t.get("verified") else ""
         elapsed_s = t.get("elapsed_ms", 0) / 1000.0
         console.print(
-            f"{icon} {i}. [bold]{t.get('role','?')}[/bold]{tools_note} "
+            f"{icon} {i}. [bold]{t.get('role','?')}[/bold]{tools_note}{verified_note} "
             f"({elapsed_s:.1f}s{attempts_note})"
         )
         result_preview = (t.get("result") or "")[:200]

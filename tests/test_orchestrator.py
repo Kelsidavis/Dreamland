@@ -610,3 +610,397 @@ class TestOrchestratorWithDispatcher:
         asyncio.run(orch.run("g", tasks))
         assert len(dispatcher.calls) == 1
         assert tasks[0].attempts == 1
+
+
+class TestRetryFeedback:
+    """A rejected attempt must retry WITH the rejection reason in the
+    prompt — re-rolling blind wastes the retry on the same mistake."""
+
+    def test_syntax_rejection_feeds_back_into_retry_prompt(self, tmp_path):
+        from towel.config import TowelConfig
+
+        class _Flaky:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    return "```python\ndef broken(\n```"
+                return "```python\ndef ok():\n    return 1\n```"
+
+        dispatcher = _Flaky()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = [AgentTask(role="coder", prompt="write f.py", extract_to="f.py")]
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        result = asyncio.run(orch.run("g", tasks, workspace_dir=str(ws)))
+        assert result.success
+        # The second prompt must carry the rejection and the reason.
+        assert "rejected" in dispatcher.prompts[1]
+        assert "SyntaxError" in dispatcher.prompts[1]
+        # The first prompt must NOT (no feedback yet).
+        assert "rejected" not in dispatcher.prompts[0]
+
+    def test_infra_failure_does_not_add_feedback(self):
+        """WorkerDispatchError retries the same prompt verbatim — the
+        model never saw the failure, so there is nothing to correct."""
+        from towel.agent.orchestrator import WorkerDispatchError
+        from towel.config import TowelConfig
+
+        class _FlakyInfra:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    raise WorkerDispatchError("timeout", worker_id="w1")
+                return "fine"
+
+        dispatcher = _FlakyInfra()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = [AgentTask(role="writer", prompt="write docs")]
+        result = asyncio.run(orch.run("g", tasks))
+        assert result.success
+        assert dispatcher.prompts[0] == dispatcher.prompts[1]
+
+
+class TestVerify:
+    """`verify=True` routes completed results through a reviewer-role
+    check; FAIL retries with the reviewer's feedback, PASS marks the
+    task verified."""
+
+    def test_fail_then_pass_retries_with_feedback(self):
+        from towel.config import TowelConfig
+
+        class _Reviewer:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+                self.reviews = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.calls.append({"role": role, "prompt": prompt})
+                if role == "reviewer":
+                    self.reviews += 1
+                    if self.reviews == 1:
+                        return "VERDICT: FAIL — missing the goodbye() function"
+                    return "VERDICT: PASS"
+                return "def hello(): ..."
+
+        dispatcher = _Reviewer()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = [AgentTask(role="coder", prompt="write hello and goodbye", verify=True)]
+        result = asyncio.run(orch.run("g", tasks))
+        assert result.success
+        assert tasks[0].verified is True
+        assert tasks[0].attempts == 2
+        # Retry prompt carries the reviewer's reason.
+        coder_prompts = [c["prompt"] for c in dispatcher.calls if c["role"] == "coder"]
+        assert len(coder_prompts) == 2
+        assert "goodbye" in coder_prompts[1]
+        assert "rejected" in coder_prompts[1]
+
+    def test_terminal_fail_marks_task_failed_and_unverified(self):
+        from towel.config import TowelConfig
+
+        class _AlwaysFail:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    return "VERDICT: FAIL — wrong output"
+                return "something off-task"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_AlwaysFail(), max_attempts=2)
+        tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
+        result = asyncio.run(orch.run("g", tasks))
+        assert not result.success
+        assert tasks[0].status == "failed"
+        assert tasks[0].verified is False
+        assert "reviewer rejected" in tasks[0].result
+
+    def test_reviewer_unavailable_accepts_unverified(self):
+        """A flaky reviewer must not kill otherwise-good work."""
+        from towel.agent.orchestrator import WorkerDispatchError
+        from towel.config import TowelConfig
+
+        class _NoReviewer:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    raise WorkerDispatchError("no worker available")
+                return "result"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_NoReviewer())
+        tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
+        result = asyncio.run(orch.run("g", tasks))
+        assert result.success
+        assert tasks[0].status == "completed"
+        assert tasks[0].verified is None
+
+    def test_unparseable_verdict_accepts_unverified(self):
+        from towel.config import TowelConfig
+
+        class _Rambler:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "reviewer":
+                    return "Well, it looks mostly fine to me I suppose."
+                return "result"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Rambler())
+        tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
+        result = asyncio.run(orch.run("g", tasks))
+        assert result.success
+        assert tasks[0].verified is None
+
+
+class TestParallelWaves:
+    """run_parallel must respect depends_on: dependents wait for their
+    dependencies and receive their output as context, same as the
+    sequential path."""
+
+    def test_dependent_sees_dependency_results(self):
+        from towel.config import TowelConfig
+        dispatcher = _RecordingDispatcher()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="architect", prompt="design part A"),
+            AgentTask(role="architect", prompt="design part B"),
+            AgentTask(role="coder", prompt="implement both", depends_on=[0, 1]),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        coder_call = next(c for c in dispatcher.calls if c["role"] == "coder")
+        assert "design part A" in coder_call["prompt"]
+        assert "design part B" in coder_call["prompt"]
+        assert "Context from previous tasks" in coder_call["prompt"]
+
+    def test_independent_tasks_share_a_wave(self):
+        """Both roots must be in flight simultaneously — the wave
+        gathers them together rather than serializing."""
+        from towel.config import TowelConfig
+
+        class _Barrier:
+            def __init__(self) -> None:
+                self.in_flight = 0
+                self.max_in_flight = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+                await asyncio.sleep(0.01)
+                self.in_flight -= 1
+                return "ok"
+
+        dispatcher = _Barrier()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="a"),
+            AgentTask(role="coder", prompt="b"),
+            AgentTask(role="reviewer", prompt="c", depends_on=[0, 1]),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        assert dispatcher.max_in_flight == 2
+
+    def test_failed_dep_skips_dependent_in_parallel(self):
+        from towel.agent.orchestrator import WorkerDispatchError
+        from towel.config import TowelConfig
+
+        class _FailFirst:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if "part A" in prompt:
+                    raise WorkerDispatchError("boom")
+                return "ok"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_FailFirst(), max_attempts=1)
+        tasks = [
+            AgentTask(role="coder", prompt="part A"),
+            AgentTask(role="coder", prompt="part B"),
+            AgentTask(role="reviewer", prompt="review", depends_on=[0]),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert not result.success
+        assert tasks[0].status == "failed"
+        assert tasks[1].status == "completed"
+        assert tasks[2].status == "skipped"
+        assert "did not complete" in tasks[2].result
+
+    def test_dependency_cycle_terminates_as_skipped(self):
+        """A cycle must terminate with the tasks skipped — not hang."""
+        from towel.config import TowelConfig
+        dispatcher = _RecordingDispatcher()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="a", depends_on=[1]),
+            AgentTask(role="coder", prompt="b", depends_on=[0]),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert not result.success
+        assert all(t.status == "skipped" for t in tasks)
+        assert "cycle" in tasks[0].result
+
+    def test_parallel_synthesis_on_success(self):
+        from towel.config import TowelConfig
+        dispatcher = _RecordingDispatcher()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [
+            AgentTask(role="coder", prompt="a"),
+            AgentTask(role="writer", prompt="b"),
+        ]
+        result = asyncio.run(orch.run_parallel("g", tasks))
+        assert result.success
+        assert "# Results for: g" in result.synthesis
+
+
+class TestPlan:
+    """`plan()` decomposes a goal into validated AgentTasks via an
+    architect-role dispatch, retrying with feedback on a bad plan."""
+
+    def test_plan_parses_json_array(self):
+        from towel.config import TowelConfig
+
+        class _Planner:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "coder", "prompt": "write calc.py",'
+                    ' "extract_to": "calc.py"},'
+                    ' {"role": "tester", "prompt": "test it",'
+                    ' "depends_on": [0]}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        tasks = asyncio.run(orch.plan("build a calculator"))
+        assert [t.role for t in tasks] == ["coder", "tester"]
+        assert tasks[0].extract_to == "calc.py"
+        assert tasks[1].depends_on == [0]
+
+    def test_plan_tolerates_fenced_json_with_prose(self):
+        from towel.config import TowelConfig
+
+        class _Chatty:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    "Here is the plan:\n```json\n"
+                    '[{"role": "writer", "prompt": "write the docs"}]\n'
+                    "```\nGood luck!"
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Chatty())
+        tasks = asyncio.run(orch.plan("document the project"))
+        assert len(tasks) == 1
+        assert tasks[0].role == "writer"
+
+    def test_plan_retries_with_feedback_on_invalid_plan(self):
+        from towel.config import TowelConfig
+
+        class _BadThenGood:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.prompts.append(prompt)
+                if len(self.prompts) == 1:
+                    return '[{"role": "codr", "prompt": "typo role"}]'
+                return '[{"role": "coder", "prompt": "fixed"}]'
+
+        dispatcher = _BadThenGood()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = asyncio.run(orch.plan("g"))
+        assert len(tasks) == 1
+        assert tasks[0].role == "coder"
+        # Second prompt carried the validation error.
+        assert "codr" in dispatcher.prompts[1]
+        assert "rejected" in dispatcher.prompts[1]
+
+    def test_plan_gives_up_after_max_attempts(self):
+        import pytest
+
+        from towel.config import TowelConfig
+
+        class _AlwaysBad:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return "no json here"
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_AlwaysBad(), max_attempts=2)
+        with pytest.raises(ValueError, match="no valid plan"):
+            asyncio.run(orch.plan("g"))
+
+    def test_plan_rejects_forward_dependencies(self):
+        """depends_on must reference EARLIER tasks only — a forward
+        reference would deadlock nothing (waves handle any DAG) but is
+        almost always a planner hallucination, so it retries."""
+        from towel.config import TowelConfig
+
+        class _Forward:
+            def __init__(self) -> None:
+                self.count = 0
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.count += 1
+                if self.count == 1:
+                    return (
+                        '[{"role": "coder", "prompt": "a", "depends_on": [1]},'
+                        ' {"role": "coder", "prompt": "b"}]'
+                    )
+                return '[{"role": "coder", "prompt": "a"}]'
+
+        dispatcher = _Forward()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        tasks = asyncio.run(orch.plan("g"))
+        assert len(tasks) == 1
+        assert dispatcher.count == 2
+
+    def test_plan_verify_flag_applies_to_all_tasks(self):
+        from towel.config import TowelConfig
+
+        class _Planner:
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                return (
+                    '[{"role": "coder", "prompt": "a"},'
+                    ' {"role": "writer", "prompt": "b"}]'
+                )
+
+        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        tasks = asyncio.run(orch.plan("g", verify=True))
+        assert all(t.verify for t in tasks)
