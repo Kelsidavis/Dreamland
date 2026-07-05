@@ -214,3 +214,26 @@ class TestProjectsPanel:
     def test_shortcut_and_palette(self):
         assert "Ctrl+Shift+P" in HTML
         assert "openProjectsPanel()" in HTML
+
+
+class TestChatPolish:
+    """Chat-surface QoL: copy affordances, scroll pill, responsive
+    layout with a slide-in sidebar for narrow screens."""
+
+    def test_code_copy_button(self):
+        assert "code-copy" in HTML
+        assert "Copy code" in HTML
+
+    def test_message_copy_button(self):
+        assert "msg-copy" in HTML
+
+    def test_scroll_pill(self):
+        assert "scroll-bottom-btn" in HTML
+
+    def test_responsive_breakpoint(self):
+        assert "@media (max-width: 900px)" in HTML
+        assert "tb-menu" in HTML
+        assert "#sidebar.open" in HTML
+
+    def test_clipboard_used(self):
+        assert "navigator.clipboard.writeText" in HTML

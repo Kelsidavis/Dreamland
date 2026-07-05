@@ -8,6 +8,12 @@ a glance whether a release affects you.
 
 ### Renamed: Towel → Dreamland (2026-07-05)
 
+Chat-surface polish: hover copy buttons on every code block and
+message, a scroll-to-latest pill when reading backlog, toolbar glyphs,
+and a responsive layout — under 900px the sidebar becomes a slide-in
+drawer behind a ☰ toggle and the panels go full-screen single-column,
+so the UI works from a phone on the LAN.
+
 The Projects experience got a first-class panel: 🛸 **projects** in
 the toolbar (Ctrl+Shift+P, `#projects` deep link) opens a dedicated
 two-column workspace — build composer and clickable run cards (state,

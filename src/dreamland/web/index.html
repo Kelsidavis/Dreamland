@@ -129,7 +129,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
 #theme-btn:hover { border-color:var(--green); color:var(--green); }
 
 /* ── Main ── */
-#main { flex:1; display:flex; flex-direction:column; min-width:0; }
+#main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
 
 /* Toolbar */
 #toolbar { padding:8px 20px; border-bottom:1px solid var(--border);
@@ -229,6 +229,46 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
 
 /* Messages */
 #messages { flex:1; overflow-y:auto; padding:20px; scroll-behavior:smooth; }
+/* Copy affordances — visible on hover, quiet otherwise. */
+.md-content pre, .content pre { position:relative; }
+.code-copy { position:absolute; top:6px; right:6px; font-family:var(--mono);
+  font-size:10px; padding:2px 8px; border-radius:5px; cursor:pointer;
+  background:var(--bg-surface); color:var(--text-dim);
+  border:1px solid var(--border); opacity:0; transition:opacity .15s; }
+pre:hover .code-copy { opacity:1; }
+.code-copy.copied { color:var(--green); border-color:var(--green-dim); }
+.msg-copy { background:none; border:none; color:var(--text-dim); cursor:pointer;
+  font-size:11px; padding:0 4px; opacity:0; transition:opacity .15s; }
+.message:hover .msg-copy { opacity:.8; }
+.msg-copy.copied { color:var(--green); opacity:1; }
+/* Scroll-to-bottom pill */
+#scroll-bottom-btn { position:absolute; right:26px; bottom:96px; z-index:50;
+  display:none; background:var(--bg-surface); color:var(--text);
+  border:1px solid var(--border); border-radius:999px; width:34px; height:34px;
+  cursor:pointer; font-size:15px; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+#scroll-bottom-btn.visible { display:block; }
+#scroll-bottom-btn:hover { border-color:var(--green-dim); color:var(--green); }
+/* Sidebar toggle (narrow screens only) */
+#tb-menu { display:none; }
+.tb-btn { white-space:nowrap; }
+/* ── Responsive: phones / narrow windows ── */
+@media (max-width: 900px) {
+  #sidebar { position:fixed; left:0; top:0; bottom:0; z-index:1200;
+    transform:translateX(-105%); transition:transform .2s ease-out;
+    box-shadow:8px 0 30px rgba(0,0,0,.5); width:min(300px, 84vw); }
+  #sidebar.open { transform:translateX(0); }
+  #tb-menu { display:inline-block; }
+  #toolbar { overflow-x:auto; }
+  #toolbar .actions { flex-wrap:nowrap; }
+  .message { max-width:100%; }
+  #messages { padding:14px 12px; }
+  #projects-panel, #fleet-panel { width:100vw; max-height:100vh; height:100vh;
+    border-radius:0; }
+  #projects-body, #fleet-body { grid-template-columns:1fr; overflow-y:auto; }
+  .projects-col + .projects-col, .fleet-col + .fleet-col {
+    border-left:none; border-top:1px solid var(--border); }
+  #scroll-bottom-btn { right:14px; }
+}
 .message { max-width:780px; margin:0 auto 16px; display:flex; gap:12px; animation:fadeIn .15s ease-out; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 .message .avatar { width:32px; height:32px; border-radius:6px;
@@ -670,12 +710,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
 
 <div id="main">
   <div id="toolbar">
+    <button class="tb-btn" id="tb-menu" title="Conversations">☰</button>
     <div class="session-info" id="session-info"></div>
     <div class="actions">
       <button class="tb-btn" id="tb-projects" title="Projects: goal-driven builds, files, git history (Ctrl+Shift+P)">🛸 projects</button>
-      <button class="tb-btn" id="tb-fleet" title="Open worker and route controls">fleet</button>
-      <button class="tb-btn" id="tb-memory" title="View persistent memory: stats, recent captures, search">memory</button>
-      <button class="tb-btn" id="tb-replay" title="Replay any saved conversation step-by-step with play/pause/scrub">replay</button>
+      <button class="tb-btn" id="tb-fleet" title="Open worker and route controls">🛰 fleet</button>
+      <button class="tb-btn" id="tb-memory" title="View persistent memory: stats, recent captures, search">◈ memory</button>
+      <button class="tb-btn" id="tb-replay" title="Replay any saved conversation step-by-step with play/pause/scrub">↻ replay</button>
       <button class="tb-btn" id="tb-settings" title="Settings: security tool-gating policy and more">settings</button>
       <button class="tb-btn" id="tb-export" title="Export as markdown">export</button>
       <button class="tb-btn" id="tb-delete" title="Delete conversation">delete</button>
@@ -688,6 +729,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       <p class="hint">Your local-first AI build fleet.<br>Type a message to begin.</p>
     </div>
   </div>
+  <button id="scroll-bottom-btn" title="Jump to latest">↓</button>
   <div id="input-area">
     <div id="input-row">
       <textarea id="user-input" placeholder="Message Dreamland..." rows="1" autofocus></textarea>
@@ -1967,7 +2009,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     // Fenced code blocks: ```lang\n...\n```
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_,lang,code) {
       const tag = lang ? `<span class="lang-tag">${lang}</span>` : '';
-      return `<pre>${tag}<code>${code.replace(/\n$/,'')}</code></pre>`;
+      return `<pre>${tag}<button class="code-copy" title="Copy code">copy</button>` +
+        `<code>${code.replace(/\n$/,'')}</code></pre>`;
     });
 
     // Inline code: `code`
@@ -2157,20 +2200,20 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     removeWelcome();
     const el = document.createElement('div'); el.className='message user';
     if(animate===false)el.style.animation='none';
-    el.innerHTML=`<div class="avatar">Y</div><div class="body"><div class="role">you</div><div class="content"></div></div>`;
+    el.innerHTML=`<div class="avatar">Y</div><div class="body"><div class="role">you <button class="msg-copy" title="Copy message">⧉</button></div><div class="content"></div></div>`;
     el.querySelector('.content').textContent=text; messagesEl.appendChild(el); scrollToBottom();
   }
   function startAssistantMessage() {
     removeWelcome();
     streamingRawText = '';  // reset the tool-call-stripping accumulator
     const el=document.createElement('div'); el.className='message assistant';
-    el.innerHTML=`<div class="avatar">T</div><div class="body"><div class="role">dreamland</div><div class="content"></div><span class="cursor"></span></div>`;
+    el.innerHTML=`<div class="avatar">T</div><div class="body"><div class="role">dreamland <button class="msg-copy" title="Copy message">⧉</button></div><div class="content"></div><span class="cursor"></span></div>`;
     messagesEl.appendChild(el); currentAssistantEl=el; currentContentEl=el.querySelector('.content');
   }
   function addStaticAssistantMessage(text) {
     removeWelcome();
     const el=document.createElement('div'); el.className='message assistant'; el.style.animation='none';
-    el.innerHTML=`<div class="avatar">T</div><div class="body"><div class="role">dreamland</div><div class="content md-content"></div></div>`;
+    el.innerHTML=`<div class="avatar">T</div><div class="body"><div class="role">dreamland <button class="msg-copy" title="Copy message">⧉</button></div><div class="content md-content"></div></div>`;
     el.querySelector('.content').innerHTML=renderMarkdown(text); messagesEl.appendChild(el);
   }
   function addToolResultStatic(text) {
@@ -3691,6 +3734,56 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     if(e.key==='Escape'&&fleetOverlay.classList.contains('visible')){closeFleetPanel(); return;}
     if(e.key==='Escape'&&isStreaming)stopGeneration();
   });
+  // Delegated copy handlers — message/code nodes are re-created on
+  // every render, so listeners live on the container.
+  messagesEl.addEventListener('click', function(e) {
+    const codeBtn = e.target.closest('.code-copy');
+    if (codeBtn) {
+      const code = codeBtn.parentElement.querySelector('code');
+      navigator.clipboard.writeText(code ? code.innerText : '').then(function() {
+        codeBtn.textContent = '✓ copied';
+        codeBtn.classList.add('copied');
+        setTimeout(function() {
+          codeBtn.textContent = 'copy';
+          codeBtn.classList.remove('copied');
+        }, 1300);
+      });
+      return;
+    }
+    const msgBtn = e.target.closest('.msg-copy');
+    if (msgBtn) {
+      const content = msgBtn.closest('.body').querySelector('.content');
+      navigator.clipboard.writeText(content ? content.innerText : '').then(function() {
+        msgBtn.textContent = '✓';
+        msgBtn.classList.add('copied');
+        setTimeout(function() {
+          msgBtn.textContent = '⧉';
+          msgBtn.classList.remove('copied');
+        }, 1300);
+      });
+    }
+  });
+
+  // Scroll-to-bottom pill: appears once the reader has scrolled up
+  // past a screenful, jumps back to the live end.
+  const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
+  messagesEl.addEventListener('scroll', function() {
+    const fromBottom = messagesEl.scrollHeight - messagesEl.scrollTop -
+      messagesEl.clientHeight;
+    scrollBottomBtn.classList.toggle('visible', fromBottom > 400);
+  });
+  scrollBottomBtn.addEventListener('click', function() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  // Narrow-screen sidebar toggle; picking a conversation closes it.
+  document.getElementById('tb-menu').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.toggle('open');
+  });
+  convListEl.addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+  });
+
   inputEl.addEventListener('input',autoResize);
   newChatBtn.addEventListener('click',startNewChat);
   convSearchEl.addEventListener('input',function(){renderConversationList(this.value);});
