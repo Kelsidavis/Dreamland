@@ -2201,6 +2201,14 @@ def ask(
     ),
 )
 @click.option(
+    "--attach", "attach_id", default=None,
+    help=(
+        "Re-attach to an existing orchestration by id (see `towel "
+        "orchestrations`) and stream its progress — e.g. after moving "
+        "to another machine."
+    ),
+)
+@click.option(
     "--json", "as_json", is_flag=True,
     help="Print raw JSON response instead of formatted output.",
 )
@@ -2215,6 +2223,7 @@ def orchestrate(
     goal_check: bool,
     repair: bool,
     watch: bool,
+    attach_id: str | None,
     as_json: bool,
 ) -> None:
     """Dispatch a multi-worker piecemeal orchestration.
@@ -2235,6 +2244,10 @@ def orchestrate(
 
     config = TowelConfig.load()
     url = f"http://{config.gateway.host}:{config.gateway.port + 1}/api/orchestrate"
+
+    if attach_id is not None:
+        _watch_status(url, attach_id, as_json)
+        return
 
     if plan_file is not None:
         with open(plan_file) as f:
@@ -2396,8 +2409,6 @@ def orchestrations(limit: int, as_json: bool) -> None:
 def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
     """Submit the orchestration in background mode and render live
     progress from GET /api/orchestrate/<id> until it finishes."""
-    import time as time_mod
-
     import httpx
 
     body = dict(body)
@@ -2412,17 +2423,34 @@ def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
         console.print(f"[red]Gateway returned {resp.status_code}:[/red] {resp.text}")
         sys.exit(1)
     oid = resp.json()["orchestration_id"]
-    status_url = f"{url}/{oid}"
     console.print(f"[dim]orchestration {oid} started — watching…[/dim]")
+    _watch_status(url, oid, as_json)
 
+
+def _watch_status(url: str, oid: str, as_json: bool) -> None:
+    """Poll one orchestration's status until it reaches a terminal
+    state, then render it. Shared by --watch (fresh submission) and
+    --attach (re-joining a run started elsewhere — the server keeps
+    running the work regardless of which machine submitted it)."""
+    import time as time_mod
+
+    import httpx
+
+    status_url = f"{url}/{oid}"
     last_line = ""
     while True:
-        time_mod.sleep(2)
         try:
-            data = httpx.get(status_url, timeout=30).json()
+            resp = httpx.get(status_url, timeout=30)
         except httpx.RequestError as exc:
             console.print(f"[red]status poll failed:[/red] {exc}")
             sys.exit(1)
+        if resp.status_code == 404:
+            console.print(
+                f"[red]Unknown orchestration id:[/red] {oid} "
+                "(see `towel orchestrations`)"
+            )
+            sys.exit(1)
+        data = resp.json()
         tasks = data.get("tasks", [])
         done = sum(1 for t in tasks if t.get("status") == "completed")
         active = [
@@ -2439,6 +2467,7 @@ def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
         if data.get("state") != "running":
             _render_orchestration(data, as_json)
             return
+        time_mod.sleep(2)
 
 
 def _post_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:

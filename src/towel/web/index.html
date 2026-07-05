@@ -1250,7 +1250,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   function openFleetPanel() {
     fleetOverlay.classList.add('visible');
     loadFleetState();
-    orchHistoryRefresh();
+    orchHistoryRefresh().then(orchAutoAttach);
     if (fleetRefreshTimer === null) {
       fleetRefreshTimer = setInterval(function() {
         if (fleetOverlay.classList.contains('visible')) {
@@ -1332,12 +1332,49 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   }
 
   async function orchPoll() {
-    if (!orchId) return;
+    if (!orchId) return null;
     try {
       const data = await apiGet('/api/orchestrate/' + encodeURIComponent(orchId));
       orchRender(data);
       if (data.state !== 'running') orchStop();
+      return data;
     } catch (e) { /* transient poll failure — next tick retries */ }
+    return null;
+  }
+
+  // Re-attach to an orchestration by id — the server keeps running the
+  // work regardless of which browser started it; this makes any
+  // machine's UI resume showing live progress instead of a blank
+  // panel. Running runs resume polling + cancel; finished runs render
+  // their final state.
+  async function orchAttach(id) {
+    if (!id) return;
+    orchId = id;
+    document.getElementById('orch-file-view').style.display = 'none';
+    document.getElementById('orch-file-head').style.display = 'none';
+    document.getElementById('orch-files-list').innerHTML = '';
+    const data = await orchPoll();
+    if (data && data.state === 'running') {
+      document.getElementById('orch-cancel-btn').style.display = '';
+      document.getElementById('orch-start-btn').disabled = true;
+      if (orchTimer === null) orchTimer = setInterval(orchPoll, 2000);
+    }
+  }
+
+  // On panel open with nothing tracked locally: attach to a running
+  // orchestration if one exists (work started from another machine /
+  // before a reload), otherwise show the most recent run's outcome.
+  async function orchAutoAttach() {
+    if (orchId) return;
+    try {
+      const data = await apiGet('/api/orchestrations?limit=20');
+      const runs = data.orchestrations || [];
+      if (!runs.length) return;
+      const running = runs.find(function(r) { return r.state === 'running'; });
+      const target = (running || runs[0]).orchestration_id;
+      document.getElementById('orch-history-select').value = target;
+      await orchAttach(target);
+    } catch (e) { /* no history — panel stays blank */ }
   }
 
   function orchStop() {
@@ -2403,6 +2440,10 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
+  document.getElementById('orch-history-select').addEventListener('change',function(){
+    const id = this.value;
+    if (id) { orchStop(); orchAttach(id); }
+  });
 
   // ── Memory panel ──────────────────────────────────────────────────
   const memoryOverlay = document.getElementById('memory-overlay');

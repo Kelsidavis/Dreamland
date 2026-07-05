@@ -275,3 +275,52 @@ class TestOrchestrateCLI:
             ])
         assert result.exit_code != 0
         assert "400" in result.output
+
+
+class TestAttach:
+    def test_attach_polls_and_renders_terminal_run(self) -> None:
+        """--attach re-joins an existing run by id — no body posted."""
+        runner = CliRunner()
+        gets: list[str] = []
+
+        def fake_get(url: str, timeout=None) -> object:  # noqa: ARG001
+            gets.append(url)
+            return _mock_response({
+                "goal": "resumed", "state": "completed", "success": True,
+                "total_elapsed_ms": 100, "synthesis": "",
+                "goal_achieved": True,
+                "tasks": [
+                    {"role": "coder", "prompt": "x", "depends_on": [],
+                     "with_tools": False, "status": "completed",
+                     "elapsed_ms": 5.0, "attempts": 1, "result": "ok"},
+                ],
+            })
+
+        posted: list = []
+
+        def fake_post(url, json=None, timeout=None):  # noqa: ARG001
+            posted.append(url)
+
+        with patch("httpx.get", side_effect=fake_get), \
+             patch("httpx.post", side_effect=fake_post):
+            result = runner.invoke(cli, [
+                "orchestrate", "--attach", "abc123def456",
+            ])
+        assert result.exit_code == 0, result.output
+        assert not posted
+        assert gets and gets[0].endswith("/api/orchestrate/abc123def456")
+        assert "resumed" in result.output
+        assert "ACHIEVED" in result.output
+
+    def test_attach_unknown_id_exits_nonzero(self) -> None:
+        runner = CliRunner()
+
+        def fake_get(url: str, timeout=None) -> object:  # noqa: ARG001
+            return _mock_response({"error": "unknown"}, status_code=404)
+
+        with patch("httpx.get", side_effect=fake_get):
+            result = runner.invoke(cli, [
+                "orchestrate", "--attach", "nope",
+            ])
+        assert result.exit_code != 0
+        assert "Unknown orchestration id" in result.output

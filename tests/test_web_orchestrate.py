@@ -58,3 +58,24 @@ class TestFileExplorer:
     def test_file_paths_escaped_and_encoded(self):
         # Paths come from disk and land in innerHTML + URLs.
         assert "encodeURIComponent" in HTML
+
+
+class TestResumeAcrossMachines:
+    """Opening the fleet panel must re-attach to server-side work —
+    an orchestration started on another machine (or before a reload)
+    resumes showing live progress instead of a blank panel."""
+
+    def test_attach_functions_exist(self):
+        assert "orchAttach" in HTML
+        assert "orchAutoAttach" in HTML
+
+    def test_panel_open_auto_attaches(self):
+        assert "orchHistoryRefresh().then(orchAutoAttach)" in HTML
+
+    def test_running_run_preferred(self):
+        assert "r.state === 'running'" in HTML
+
+    def test_history_select_loads_run(self):
+        # Selecting a past run attaches to it (status + tasks), not
+        # just the file browser.
+        assert "orchStop(); orchAttach(id);" in HTML

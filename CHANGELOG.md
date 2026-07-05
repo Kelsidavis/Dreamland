@@ -33,6 +33,11 @@ on a two-worker MLX fleet:
 - **Web UI**: the fleet panel gains an Orchestrate section — enter a
   goal, toggle verify/repair, watch per-task progress live, cancel
   mid-run. Backed by the background API.
+- **Resume from any machine**: opening the fleet panel re-attaches to
+  a running orchestration automatically (work started on another
+  machine or before a reload resumes showing live progress instead of
+  a blank panel); the recent-runs picker loads any run's full status;
+  `towel orchestrate --attach <id>` does the same from the CLI.
 - **Persistent history**: every run (sync and background) is recorded
   to `~/.towel/orchestrations.json` (newest 100 kept); records survive
   coordinator restarts, in-flight runs get marked `interrupted`.
