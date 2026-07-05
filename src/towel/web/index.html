@@ -470,6 +470,14 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
                         border:1px solid var(--border);border-radius:4px;
                         padding:6px 8px;margin-bottom:6px;font-family:var(--mono);
                         font-size:0.8em">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+                      margin-bottom:6px">
+            <button class="tb-btn" id="orch-addfiles-btn"
+                    title="Seed existing code files into the workspace so the goal modifies them instead of starting from scratch">+ seed files</button>
+            <span id="orch-seed-list" style="display:flex;gap:6px;flex-wrap:wrap;
+                  font-family:var(--mono);font-size:10px"></span>
+            <input type="file" id="orch-file-input" multiple style="display:none">
+          </div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;
                       font-size:0.8em;margin-bottom:8px">
             <label><input type="checkbox" id="orch-verify" checked> verify each task</label>
@@ -1412,6 +1420,60 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     document.getElementById('orch-start-btn').disabled = false;
   }
 
+  // ---- Seed files: local code files read in the browser and sent as
+  // the JSON `files` map, so a goal modifies existing code instead of
+  // starting from scratch. Server caps mirror here: 32 files, 2MB.
+  let orchSeeds = {};
+
+  function orchSeedTotal() {
+    return Object.values(orchSeeds).reduce(function(n, s) {
+      return n + s.length;
+    }, 0);
+  }
+
+  function orchRenderSeeds() {
+    const el = document.getElementById('orch-seed-list');
+    el.innerHTML = Object.keys(orchSeeds).map(function(name) {
+      return '<span class="fleet-badge" style="cursor:default">📄 ' +
+        orchEsc(name) +
+        ' <a href="#" data-seed="' + orchEsc(name) + '" ' +
+        'style="color:var(--red);text-decoration:none" title="remove">×</a></span>';
+    }).join('');
+    el.querySelectorAll('a[data-seed]').forEach(function(a) {
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        delete orchSeeds[a.dataset.seed];
+        orchRenderSeeds();
+      });
+    });
+  }
+
+  async function orchAddSeedFiles(fileList) {
+    for (const f of fileList) {
+      if (Object.keys(orchSeeds).length >= 32) {
+        alert('Seed limit is 32 files.');
+        break;
+      }
+      let text;
+      try {
+        text = await f.text();
+      } catch (e) {
+        alert('Could not read ' + f.name);
+        continue;
+      }
+      if (text.indexOf('\u0000') !== -1) {
+        alert(f.name + ' looks binary — seed files must be text.');
+        continue;
+      }
+      if (orchSeedTotal() + text.length > 2 * 1024 * 1024) {
+        alert('Seed files exceed the 2MB total cap; ' + f.name + ' skipped.');
+        continue;
+      }
+      orchSeeds[f.name] = text;
+    }
+    orchRenderSeeds();
+  }
+
   async function orchStart() {
     const goal = document.getElementById('orch-goal').value.trim();
     if (!goal) { alert('Enter a goal first.'); return; }
@@ -1423,8 +1485,11 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     };
     const ws = document.getElementById('orch-workspace').value.trim();
     if (ws) body.workspace_dir = ws;
+    if (Object.keys(orchSeeds).length) body.files = orchSeeds;
     const data = await apiPost('/api/orchestrate', body);
     if (data.error) { alert('Orchestration failed to start: ' + data.error); return; }
+    orchSeeds = {};
+    orchRenderSeeds();
     orchId = data.orchestration_id;
     document.getElementById('orch-status').textContent = 'running: submitted (planning…)';
     document.getElementById('orch-tasks').innerHTML = '';
@@ -2473,6 +2538,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
+  document.getElementById('orch-addfiles-btn').addEventListener('click',function(){
+    document.getElementById('orch-file-input').click();
+  });
+  document.getElementById('orch-file-input').addEventListener('change',function(){
+    orchAddSeedFiles(Array.from(this.files));
+    this.value = '';
+  });
   document.getElementById('orch-download-btn').addEventListener('click',function(){
     const id = orchFileTargetId();
     if (!id) { alert('No run selected — start an orchestration or pick a past run.'); return; }

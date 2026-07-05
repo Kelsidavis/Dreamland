@@ -109,3 +109,34 @@ class TestArchiveDownload:
 
     def test_uses_archive_endpoint(self):
         assert "/archive" in HTML
+
+
+class TestSeedFileWidget:
+    def test_widget_elements_exist(self):
+        for element_id in (
+            "orch-addfiles-btn",
+            "orch-file-input",
+            "orch-seed-list",
+        ):
+            assert element_id in HTML, f"missing #{element_id}"
+
+    def test_reads_files_client_side(self):
+        assert "orchAddSeedFiles" in HTML
+        assert "f.text()" in HTML
+
+    def test_caps_mirror_server(self):
+        assert "32 files" in HTML or "32) {" in HTML
+        assert "2 * 1024 * 1024" in HTML
+
+    def test_binary_rejected(self):
+        assert "\\u0000" in HTML
+
+    def test_seeds_sent_in_body(self):
+        assert "body.files = orchSeeds" in HTML
+
+    def test_no_raw_nul_bytes(self):
+        from pathlib import Path
+        raw = (
+            Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html"
+        ).read_bytes()
+        assert b"\x00" not in raw

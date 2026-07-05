@@ -68,6 +68,10 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **Seed files in the browser**: the Orchestrate panel gains a
+  "+ seed files" picker — local code files are read client-side
+  (FileReader), shown as removable chips, and sent in the JSON `files`
+  map; caps mirror the server (32 files / 2MB), binary files rejected.
 - **Seed files (the push half)**: `POST /api/orchestrate` accepts
   `"files": {path: content}` (CLI `--file PATH` / `--file NAME=PATH`),
   written into the workspace before planning; the planner sees the
