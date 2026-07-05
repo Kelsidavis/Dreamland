@@ -8,6 +8,11 @@ a glance whether a release affects you.
 
 ### Renamed: Towel → Dreamland (2026-07-05)
 
+Saved transcripts render tool calls as collapsible ⚙ chips instead
+of pages of raw `<tool_call>` markup (payload preserved behind a
+click), and a finished background build fires a desktop notification
+when the tab is hidden (permission requested on first build).
+
 Chat-surface polish: hover copy buttons on every code block and
 message, a scroll-to-latest pill when reading backlog, toolbar glyphs,
 and a responsive layout — under 900px the sidebar becomes a slide-in

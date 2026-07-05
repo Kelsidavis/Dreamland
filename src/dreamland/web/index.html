@@ -307,6 +307,16 @@ pre:hover .code-copy { opacity:1; }
 .tool-call { margin:6px 0; padding:8px 12px; background:rgba(230,200,76,0.06);
   border-left:3px solid var(--yellow); border-radius:0 6px 6px 0;
   font-family:var(--mono); font-size:12px; color:var(--yellow); }
+.tool-chip { margin:6px 0; font-family:var(--mono); font-size:11px; }
+.tool-chip summary { display:inline-block; cursor:pointer; color:var(--text-dim);
+  background:var(--bg-input); border:1px solid var(--border); border-radius:999px;
+  padding:3px 12px; user-select:none; list-style:none; }
+.tool-chip summary::-webkit-details-marker { display:none; }
+.tool-chip summary:hover { border-color:var(--green-dim); color:var(--text); }
+.tool-chip[open] summary { color:var(--cyan); }
+.tool-chip pre { margin-top:6px; background:var(--bg-input);
+  border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+  overflow-x:auto; color:var(--text-dim); white-space:pre-wrap; }
 .tool-result { margin:4px 0 6px; padding:8px 12px; background:rgba(92,106,122,0.08);
   border-left:3px solid var(--text-dim); border-radius:0 6px 6px 0;
   font-family:var(--mono); font-size:12px; color:var(--text-dim);
@@ -1543,12 +1553,26 @@ pre:hover .code-copy { opacity:1; }
     }
   }
 
+  let orchNotifiedDone = null;
+
+  function orchNotifyDone(data) {
+    // One notification per run, only when the tab isn't being watched.
+    if (orchNotifiedDone === orchId || !document.hidden) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    orchNotifiedDone = orchId;
+    const verdict = data.goal_achieved === true ? ' — goal achieved'
+      : data.goal_achieved === false ? ' — goal incomplete' : '';
+    new Notification('Dreamland build ' + data.state + verdict, {
+      body: (data.goal || '').slice(0, 120),
+    });
+  }
+
   async function orchPoll() {
     if (!orchId) return null;
     try {
       const data = await apiGet('/api/orchestrate/' + encodeURIComponent(orchId));
       orchRender(data);
-      if (data.state !== 'running') orchStop();
+      if (data.state !== 'running') { orchNotifyDone(data); orchStop(); }
       return data;
     } catch (e) { /* transient poll failure — next tick retries */ }
     return null;
@@ -1663,6 +1687,11 @@ pre:hover .code-copy { opacity:1; }
       body.workspace_dir = ws;
     }
     if (Object.keys(orchSeeds).length) body.files = orchSeeds;
+    // Ask once for notification permission so a finished background
+    // build can ping even when the tab is hidden.
+    if ('Notification' in window && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch (e) { /* optional */ }
+    }
     const data = await apiPost('/api/orchestrate', body);
     if (data.error) { alert('Orchestration failed to start: ' + data.error); return; }
     orchSeeds = {};
@@ -2116,6 +2145,37 @@ pre:hover .code-copy { opacity:1; }
   // "→ tool(args)" entry instead.
   let streamingRawText = '';
 
+  // Saved transcripts contain raw <tool_call> markup (live streams
+  // render structured events instead). Convert the blocks to
+  // collapsible chips: the noise folds away, the information stays.
+  function extractToolCalls(text) {
+    const chips = [];
+    const grab = function(_, inner) {
+      chips.push(inner.trim());
+      return '\u0007TOOLCHIP' + (chips.length - 1) + '\u0007';
+    };
+    let cleaned = text.replace(/<tool_call>([\s\S]*?)<\/tool_call>/g, grab);
+    cleaned = cleaned.replace(/<\|tool_call\|>([\s\S]*?)<\|\/tool_call\|>/g, grab);
+    return { cleaned: cleaned, chips: chips };
+  }
+
+  function toolChipHtml(inner) {
+    let name = 'tool call';
+    let m = inner.match(/<function=([\w.-]+)>/);
+    if (!m) m = inner.match(/"name"\s*:\s*"([\w.-]+)"/);
+    if (m) name = m[1];
+    return '<details class="tool-chip"><summary>⚙ ' + orchEsc(name) +
+      '</summary><pre>' + orchEsc(inner) + '</pre></details>';
+  }
+
+  function renderTranscriptMarkdown(text) {
+    const parts = extractToolCalls(text || '');
+    let html = renderMarkdown(parts.cleaned);
+    return html.replace(/\u0007TOOLCHIP(\d+)\u0007/g, function(_, i) {
+      return toolChipHtml(parts.chips[Number(i)]);
+    });
+  }
+
   function stripToolCallMarkup(text) {
     if (!text) return text;
     // Complete blocks in any of the three common formats.
@@ -2214,7 +2274,7 @@ pre:hover .code-copy { opacity:1; }
     removeWelcome();
     const el=document.createElement('div'); el.className='message assistant'; el.style.animation='none';
     el.innerHTML=`<div class="avatar">T</div><div class="body"><div class="role">dreamland <button class="msg-copy" title="Copy message">⧉</button></div><div class="content md-content"></div></div>`;
-    el.querySelector('.content').innerHTML=renderMarkdown(text); messagesEl.appendChild(el);
+    el.querySelector('.content').innerHTML=renderTranscriptMarkdown(text); messagesEl.appendChild(el);
   }
   function addToolResultStatic(text) {
     const el=document.createElement('div'); el.className='tool-result'; el.style.animation='none';

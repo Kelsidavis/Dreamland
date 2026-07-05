@@ -237,3 +237,27 @@ class TestChatPolish:
 
     def test_clipboard_used(self):
         assert "navigator.clipboard.writeText" in HTML
+
+
+class TestToolChips:
+    """Saved transcripts render tool-call markup as collapsible chips —
+    the noise folds away, the payload stays inspectable."""
+
+    def test_chip_pipeline_exists(self):
+        for marker in ("extractToolCalls", "toolChipHtml",
+                       "renderTranscriptMarkdown", "tool-chip"):
+            assert marker in HTML, marker
+
+    def test_history_renderer_uses_chips(self):
+        assert "renderTranscriptMarkdown(text)" in HTML
+
+    def test_chip_content_escaped(self):
+        # Tool payloads are model output rendered via innerHTML.
+        assert "orchEsc(inner)" in HTML
+
+
+class TestBuildNotifications:
+    def test_notification_on_finish(self):
+        assert "orchNotifyDone" in HTML
+        assert "Notification.permission" in HTML
+        assert "document.hidden" in HTML
