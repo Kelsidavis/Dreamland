@@ -2269,6 +2269,39 @@ class GatewayServer:
         session.conversation.add(_Role.USER, prompt)
 
         from towel.agent.orchestrator import WorkerDispatchError
+
+        # Planning is the highest-leverage single call in an
+        # orchestration — the plan's structure decides everything that
+        # follows — and it runs once, so latency is bounded. When the
+        # coordinator's own model dwarfs the best worker (or no worker
+        # is connected at all), run the plan locally instead of
+        # dispatching it to an under-spec worker. Per-task work and
+        # audit panels stay on the fleet: they're the volume.
+        if (
+            task_type == "plan"
+            and not with_tools
+            and self._should_plan_locally()
+        ):
+            try:
+                text = await self._local_role_inference(
+                    role_system, prompt,
+                    max_tokens=max_tokens,
+                )
+                if text:
+                    log.info(
+                        "dispatch: role=%s (plan) served by the "
+                        "coordinator-local model", role,
+                    )
+                    self.cleanup_ephemeral_session(session_id)
+                    return text
+            except Exception as exc:
+                # Local inference is an upgrade, not a dependency —
+                # fall through to normal worker dispatch.
+                log.warning(
+                    "local plan inference failed (%s); dispatching to "
+                    "the fleet", exc,
+                )
+
         worker = None
         try:
             worker, _intent = await self._route_by_role(
@@ -2978,6 +3011,65 @@ class GatewayServer:
             log.info("pruned managed workspace for evicted run %s", oid)
         except OSError as exc:
             log.warning("workspace prune failed for %s: %s", oid, exc)
+
+    def _should_plan_locally(self) -> bool:
+        """True when the coordinator's own model is a clearly better
+        planner than anything connected.
+
+        Two ways in: no eligible worker at all (planning locally beats
+        failing), or the local model's parameter count is at least
+        double the largest connected worker's. Size heuristics come
+        from model names via `_guess_model_param_b`; unknown sizes
+        disable the shortcut rather than guessing. Opt out with
+        ``local_planner_enabled = false`` in config.
+        """
+        if not getattr(self.config, "local_planner_enabled", True):
+            return False
+        if not hasattr(self.agent, "generate_from_request"):
+            return False
+        local_name = (
+            getattr(self.agent, "loaded_model_name", None)
+            or getattr(self.config.model, "name", "")
+        )
+        local_b = _guess_model_param_b(local_name)
+        if local_b is None:
+            return False
+        eligible = [
+            w for w in self._workers.list()
+            if w.enabled and not w.draining
+        ]
+        if not eligible:
+            return True
+        worker_bs = [
+            _guess_model_param_b(w.capabilities.get("model") or "")
+            for w in eligible
+        ]
+        known = [b for b in worker_bs if b is not None]
+        if len(known) != len(worker_bs):
+            # A worker of unknown size might be the big one — don't
+            # steal its planning work on a guess.
+            return False
+        return local_b >= 2 * max(known)
+
+    async def _local_role_inference(
+        self,
+        role_system: str,
+        prompt: str,
+        *,
+        max_tokens: int,
+    ) -> str:
+        """One inference on the coordinator's own runtime with a role
+        identity — the messages-payload path every runtime already
+        supports for remote workers, pointed at ourselves."""
+        request = {
+            "mode": self._desired_worker_capabilities()["preferred_mode"],
+            "system": role_system,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "reasoning_effort": "none",
+        }
+        result = await self.agent.generate_from_request(request)
+        return getattr(result, "text", "") or ""
 
     def available_worker_count(self) -> int:
         """How many workers can accept orchestrator subtasks right now.

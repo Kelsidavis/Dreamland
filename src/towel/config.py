@@ -148,6 +148,13 @@ class TowelConfig(BaseModel):
     # so false positives stay low. Set to False to disable entirely.
     auto_capture: bool = True
 
+    # Orchestration planning on the coordinator's own model when it is
+    # at least twice the size of the best connected worker (or the
+    # fleet is empty). The plan is the highest-leverage single call in
+    # an orchestration and runs once, so the latency is bounded. Set
+    # False to always dispatch planning to workers.
+    local_planner_enabled: bool = True
+
     # When regex auto-capture produces zero captures on a user turn,
     # fire a background LLM call to extract memories the patterns
     # missed (multi-sentence context, paraphrase, indirect mention).

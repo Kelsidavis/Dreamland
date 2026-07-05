@@ -5779,3 +5779,87 @@ class TestWorkspacePruning:
             "some-id", {"workspace_dir": str(other)},
         )
         assert other.exists()
+
+
+class TestLocalPlanner:
+    """Planning routes to the coordinator's own model when it dwarfs
+    the best connected worker (or the fleet is empty) — the plan is
+    the highest-leverage single call in an orchestration."""
+
+    def _set_local_model(self, gateway, name):
+        gateway.config.model.name = name
+
+    def test_prefers_local_when_fleet_empty(self, gateway):
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        assert gateway._should_plan_locally() is True
+
+    def test_prefers_local_when_double_the_best_worker(self, gateway):
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        gateway._workers.register(
+            "w1", None, {"model": "Qwen2.5-7B-Instruct-4bit"},
+        )
+        assert gateway._should_plan_locally() is True
+
+    def test_defers_to_comparable_worker(self, gateway):
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        gateway._workers.register(
+            "w1", None, {"model": "Llama-3.3-70B-Instruct-4bit"},
+        )
+        assert gateway._should_plan_locally() is False
+
+    def test_unknown_worker_size_disables_shortcut(self, gateway):
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        gateway._workers.register("w1", None, {"model": "mystery-model"})
+        assert gateway._should_plan_locally() is False
+
+    def test_unknown_local_size_disables_shortcut(self, gateway):
+        self._set_local_model(gateway, "mystery-local")
+        assert gateway._should_plan_locally() is False
+
+    def test_config_opt_out(self, gateway):
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        gateway.config.local_planner_enabled = False
+        assert gateway._should_plan_locally() is False
+
+    def test_plan_dispatch_served_locally_when_fleet_empty(self, gateway):
+        """dispatch_role_task(task_type='plan') must return the local
+        model's text instead of raising no-worker-available."""
+        import asyncio
+
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+
+        class _Result:
+            text = '[{"role": "coder", "prompt": "x"}]'
+
+        async def fake_generate(request):
+            fake_generate.request = request
+            return _Result()
+
+        gateway.agent.generate_from_request = fake_generate  # type: ignore[method-assign]
+
+        text = asyncio.run(gateway.dispatch_role_task(
+            "planner", "You are a planning engine.", "plan this goal",
+            session_id="orch-planner-test1",
+            max_tokens=2048, temperature=0.4,
+            with_tools=False, task_type="plan", exclude_workers=None,
+        ))
+        assert text == '[{"role": "coder", "prompt": "x"}]'
+        req = fake_generate.request
+        assert req["system"] == "You are a planning engine."
+        assert req["messages"][0]["content"] == "plan this goal"
+
+    def test_non_plan_roles_still_require_workers(self, gateway):
+        import asyncio
+
+        import pytest as _pytest
+
+        from towel.agent.orchestrator import WorkerDispatchError
+        self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
+        with _pytest.raises(WorkerDispatchError):
+            asyncio.run(gateway.dispatch_role_task(
+                "coder", "sys", "write code",
+                session_id="orch-coder-test1",
+                max_tokens=2048, temperature=0.4,
+                with_tools=False, task_type="generate",
+                exclude_workers=None,
+            ))

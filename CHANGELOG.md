@@ -38,6 +38,12 @@ on a two-worker MLX fleet:
   coordinator restarts, in-flight runs get marked `interrupted`.
   `GET /api/orchestrations` and `towel orchestrations` list recent
   runs; `GET /api/orchestrate/<id>` serves finished runs from history.
+- **Local planner**: when the coordinator's own model is ≥2× the best
+  connected worker (or the fleet is empty), orchestration PLANNING
+  runs on the coordinator instead of an under-spec worker — judgment
+  on the big model, volume on the fleet. Live: a two-file build that
+  coin-flipped under 7B planning completed first-try in 13s with a
+  textbook plan. `local_planner_enabled = false` opts out.
 - **Managed workspaces**: omitting `workspace_dir` now provisions
   `~/.towel/workspaces/<id>` automatically — previously extract_to
   files were silently never written, so a bare goal produced a
