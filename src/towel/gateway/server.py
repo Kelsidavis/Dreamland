@@ -7666,6 +7666,62 @@ class GatewayServer:
                     {"error": "background must be a boolean"}, status_code=400,
                 )
 
+            # Seed files: {"relative/path.py": "content", …} written
+            # into the workspace before planning, so a goal can operate
+            # on EXISTING code — the round trip for external systems is
+            # pull → edit → POST goal+files → pull the result.
+            seed_files_raw = body.get("files") or {}
+            if not isinstance(seed_files_raw, dict):
+                return JSONResponse(
+                    {"error": "files must be an object of path -> content"},
+                    status_code=400,
+                )
+            if len(seed_files_raw) > 32:
+                return JSONResponse(
+                    {"error": "files must have 32 entries or fewer"},
+                    status_code=400,
+                )
+            seed_total = 0
+            for fpath, fbody in seed_files_raw.items():
+                if not isinstance(fpath, str) or not fpath.strip():
+                    return JSONResponse(
+                        {"error": "files keys must be non-empty relative paths"},
+                        status_code=400,
+                    )
+                if not isinstance(fbody, str):
+                    return JSONResponse(
+                        {"error": f"files[{fpath!r}] must be string content"},
+                        status_code=400,
+                    )
+                parts = fpath.split("/")
+                if any(not p or p.startswith(".") for p in parts):
+                    return JSONResponse(
+                        {"error": (
+                            f"files[{fpath!r}]: path segments may not be "
+                            "empty or start with '.'"
+                        )},
+                        status_code=400,
+                    )
+                seed_total += len(fbody.encode("utf-8", errors="replace"))
+            if seed_total > 2 * 1024 * 1024:
+                return JSONResponse(
+                    {"error": "seed files exceed the 2MB total cap"},
+                    status_code=400,
+                )
+
+            def _write_seed_files(ws: str) -> None:
+                from pathlib import Path as _Path
+                root = _Path(ws)
+                for fpath, fbody in seed_files_raw.items():
+                    target = root / fpath
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(fbody, encoding="utf-8")
+                if seed_files_raw:
+                    log.info(
+                        "orchestrate: seeded %d file(s) into %s",
+                        len(seed_files_raw), ws,
+                    )
+
             orch = Orchestrator(
                 config=self.config,
                 skills=getattr(self.agent, "skills", None),
@@ -7678,9 +7734,13 @@ class GatewayServer:
                 oid = uuid.uuid4().hex[:12]
                 if workspace_dir is None:
                     workspace_dir = self._managed_workspace(oid)
+                _write_seed_files(workspace_dir)
                 if auto_plan:
                     try:
-                        tasks = await orch.plan(goal, verify=verify_all_raw)
+                        tasks = await orch.plan(
+                            goal, verify=verify_all_raw,
+                            workspace_dir=workspace_dir,
+                        )
                     except ValueError as exc:
                         # Planner exhausted its retries without a valid
                         # plan — a fleet/model problem, not a caller error.
@@ -7733,6 +7793,7 @@ class GatewayServer:
             oid = uuid.uuid4().hex[:12]
             if workspace_dir is None:
                 workspace_dir = self._managed_workspace(oid)
+            _write_seed_files(workspace_dir)
             job: dict[str, Any] = {
                 "goal": goal,
                 "tasks": tasks,           # empty until auto-plan finishes
@@ -7748,7 +7809,10 @@ class GatewayServer:
                 try:
                     run_tasks = job["tasks"]
                     if auto_plan:
-                        run_tasks = await orch.plan(goal, verify=verify_all_raw)
+                        run_tasks = await orch.plan(
+                            goal, verify=verify_all_raw,
+                            workspace_dir=workspace_dir,
+                        )
                         job["tasks"] = run_tasks
                     job["result"] = await orch.run_goal(
                         goal, run_tasks,

@@ -267,10 +267,15 @@ towel orchestrate \
   `POST /api/orchestrate {"background": true}` returns an id and
   `GET/DELETE /api/orchestrate/<id>` polls or cancels.
 - **Pull the artifacts** — `GET /api/orchestrate/<id>/files` lists the
-  project files a run produced; `GET /api/orchestrate/<id>/files/<path>`
-  serves raw contents (traversal-guarded, scoped to the run's recorded
-  workspace). The fleet panel includes a file explorer / code viewer
-  over the same endpoints.
+  project files a run produced; `…/files/<path>` serves raw contents and
+  `…/archive` the whole workspace as a zip (traversal-guarded, scoped to
+  the run's recorded workspace). `towel pull <id> [dest]` downloads and
+  unpacks a build on any machine, and the fleet panel includes a file
+  explorer / code viewer with a zip download over the same endpoints.
+- **Push existing code back** — `POST /api/orchestrate` accepts
+  `"files": {"path": "content"}` (CLI `--file mycode.py`), seeding the
+  workspace so the goal modifies real code instead of starting from
+  scratch: pull → edit → push → pull the result.
 
 Hand-authored plans still work: `towel orchestrate plan.json` or
 repeated `--task "role:prompt@deps+tools"` specs.

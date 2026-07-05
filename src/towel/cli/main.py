@@ -2209,6 +2209,14 @@ def ask(
     ),
 )
 @click.option(
+    "--file", "seed_files", multiple=True,
+    help=(
+        "Seed an existing file into the workspace before planning, so "
+        "the goal can modify it. PATH uses the basename; NAME=PATH "
+        "sets the workspace-relative name. May be repeated."
+    ),
+)
+@click.option(
     "--json", "as_json", is_flag=True,
     help="Print raw JSON response instead of formatted output.",
 )
@@ -2224,6 +2232,7 @@ def orchestrate(
     repair: bool,
     watch: bool,
     attach_id: str | None,
+    seed_files: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """Dispatch a multi-worker piecemeal orchestration.
@@ -2248,6 +2257,22 @@ def orchestrate(
     if attach_id is not None:
         _watch_status(url, attach_id, as_json)
         return
+
+    # --file seeds: read local files now so a typo fails before the
+    # request, not after a plan has been generated.
+    from pathlib import Path as _Path
+    seeds: dict[str, str] = {}
+    for spec in seed_files:
+        if "=" in spec:
+            name, _, local = spec.partition("=")
+        else:
+            local = spec
+            name = _Path(spec).name
+        p = _Path(local).expanduser()
+        if not p.is_file():
+            console.print(f"[red]--file not found:[/red] {local}")
+            sys.exit(1)
+        seeds[name.strip()] = p.read_text(encoding="utf-8", errors="replace")
 
     if plan_file is not None:
         with open(plan_file) as f:
@@ -2290,6 +2315,8 @@ def orchestrate(
                 body["repair"] = True
             if workspace_dir:
                 body["workspace_dir"] = workspace_dir
+            if seeds:
+                body["files"] = seeds
             console.print(
                 "[dim]No --task specs given — the fleet will plan the "
                 "subtasks itself.[/dim]"
@@ -2340,6 +2367,9 @@ def orchestrate(
             body["repair"] = True
         if workspace_dir:
             body["workspace_dir"] = workspace_dir
+
+    if seeds:
+        body["files"] = seeds
 
     if watch:
         _watch_orchestrate(url, body, as_json)

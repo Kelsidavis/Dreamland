@@ -869,6 +869,7 @@ class Orchestrator:
         *,
         max_tasks: int = 8,
         verify: bool = False,
+        workspace_dir: str | None = None,
     ) -> list[AgentTask]:
         """Decompose a goal into an executable task list — no
         hand-authored plan required.
@@ -892,13 +893,57 @@ class Orchestrator:
         # planner-role subtask produced a write_file JSON blob where a
         # Python file was expected). "default" adds nothing over the
         # specific roles. Keep both out of the menu.
+        # Seeded / pre-existing project files ground the plan: a goal
+        # like "add logging to app.py" must plan MODIFICATIONS of what
+        # exists, not invent files from scratch.
+        files_block = self._workspace_files_block(workspace_dir)
         base_prompt = (
             f"Decompose the following goal into 1-{max_tasks} subtasks "
             "for specialist workers.\n\n"
             f"Goal: {goal}\n\n"
-            f"{self._plan_schema_guide()}"
+            + (
+                "The project already contains these files. A task that "
+                "modifies one must set extract_to to that EXACT path "
+                "and produce the complete updated file.\n"
+                f"{files_block}\n\n"
+                if files_block else ""
+            )
+            + f"{self._plan_schema_guide()}"
         )
         return await self._plan_loop(base_prompt, label=goal[:60], verify=verify)
+
+    @staticmethod
+    def _workspace_files_block(
+        workspace_dir: str | None,
+        *,
+        limit_files: int = 8,
+        limit_chars: int = 2000,
+    ) -> str:
+        """Trimmed contents of a workspace's existing files, for
+        grounding the initial plan when the caller seeded the workspace
+        (or re-runs against a previous build)."""
+        if not workspace_dir:
+            return ""
+        from pathlib import Path
+        root = Path(workspace_dir)
+        if not root.is_dir():
+            return ""
+        blocks: list[str] = []
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root)
+            if any(
+                part.startswith(".") or part == "__pycache__"
+                for part in rel.parts
+            ):
+                continue
+            if len(blocks) >= limit_files:
+                blocks.append("… (more files not shown)")
+                break
+            body = p.read_text(encoding="utf-8", errors="replace")[:limit_chars]
+            blocks.append(f"--- {rel} ---\n{body}")
+        return "\n".join(blocks)
 
     def _plan_schema_guide(self) -> str:
         """The JSON schema + rules block shared by every planning

@@ -5925,3 +5925,69 @@ class TestOrchestrateArchive:
             "tasks": [{"role": "writer", "prompt": "x"}],
         }).json()["orchestration_id"]
         assert client.get(f"/api/orchestrate/{oid}/archive").status_code == 404
+
+
+class TestSeedFiles:
+    """POST /api/orchestrate {"files": {...}} writes existing project
+    files into the workspace before planning — the push half of the
+    pull → edit → push round trip."""
+
+    def test_seeds_written_and_planner_grounded(self, gateway, client):
+        prompts: list[str] = []
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            prompts.append(prompt)
+            if role == "planner":
+                return (
+                    '[{"role": "coder", "prompt": "add goodbye",'
+                    ' "extract_to": "greet.py"}]'
+                )
+            return "```python\ndef hello():\n    pass\ndef goodbye():\n    pass\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        # Big-model shortcut off so the planner dispatch is observable.
+        gateway.config.model.name = ""
+
+        resp = client.post("/api/orchestrate", json={
+            "goal": "add a goodbye() function to greet.py",
+            "files": {"greet.py": "SEED_MARKER = True\ndef hello():\n    pass\n"},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        # The planner saw the seeded file's contents.
+        assert "SEED_MARKER" in prompts[0]
+        assert "already contains these files" in prompts[0]
+        # The modified file is pullable.
+        oid = data["orchestration_id"]
+        got = client.get(f"/api/orchestrate/{oid}/files/greet.py")
+        assert "goodbye" in got.text
+
+    def test_seed_path_validation(self, client):
+        for bad in ("../evil.py", ".hidden", "a//b.py", ""):
+            resp = client.post("/api/orchestrate", json={
+                "goal": "g",
+                "tasks": [{"role": "coder", "prompt": "x"}],
+                "files": {bad: "content"},
+            })
+            assert resp.status_code == 400, bad
+
+    def test_seed_size_cap(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+            "files": {"big.txt": "x" * (2 * 1024 * 1024 + 1)},
+        })
+        assert resp.status_code == 400
+        assert "2MB" in resp.json()["error"]
+
+    def test_seed_count_cap(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+            "files": {f"f{i}.py": "x" for i in range(33)},
+        })
+        assert resp.status_code == 400

@@ -68,6 +68,12 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **Seed files (the push half)**: `POST /api/orchestrate` accepts
+  `"files": {path: content}` (CLI `--file PATH` / `--file NAME=PATH`),
+  written into the workspace before planning; the planner sees the
+  existing project contents and plans modifications of real code.
+  Verified live: pull a build, push it back with an "add a function"
+  goal, pull the correctly-modified result.
 - **One-command project pulls**: `GET /api/orchestrate/<id>/archive`
   serves the whole workspace as a zip (same filters as the listing,
   200MB cap); the web explorer gains a "↓ zip" download button; new

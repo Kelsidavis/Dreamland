@@ -391,3 +391,45 @@ class TestPull:
                 "pull", "nope", str(tmp_path / "out"),
             ])
         assert result.exit_code != 0
+
+
+class TestSeedFilesCLI:
+    def test_file_option_reads_and_sends(self, tmp_path) -> None:
+        runner = CliRunner()
+        local = tmp_path / "mycode.py"
+        local.write_text("LOCAL = 1\n")
+        captured: dict = {}
+
+        def fake_post(url: str, json: dict, timeout=None) -> object:  # noqa: ARG001
+            captured["json"] = json
+            return _mock_response({
+                "goal": "g", "success": True, "total_elapsed_ms": 0,
+                "synthesis": "", "tasks": [],
+            })
+
+        with patch("httpx.post", side_effect=fake_post):
+            result = runner.invoke(cli, [
+                "orchestrate", "--goal", "improve it",
+                "--file", str(local),
+                "--file", f"pkg/renamed.py={local}",
+            ])
+        assert result.exit_code == 0, result.output
+        files = captured["json"]["files"]
+        assert files["mycode.py"] == "LOCAL = 1\n"
+        assert files["pkg/renamed.py"] == "LOCAL = 1\n"
+
+    def test_missing_file_fails_before_request(self) -> None:
+        runner = CliRunner()
+        posted = []
+
+        def fake_post(url, json=None, timeout=None):  # noqa: ARG001
+            posted.append(url)
+
+        with patch("httpx.post", side_effect=fake_post):
+            result = runner.invoke(cli, [
+                "orchestrate", "--goal", "g",
+                "--file", "/nonexistent/nope.py",
+            ])
+        assert result.exit_code != 0
+        assert not posted
+        assert "not found" in result.output
