@@ -68,6 +68,11 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **Project continuity**: `"project": <id>` (CLI `--project`, web
+  "continue selected project" checkbox) reuses a previous run's
+  workspace — goals accumulate on one project, commits stack on one
+  repo, and an existing clone updates with plain `git pull` after each
+  run. Verified live: three goals, three commits, pull-able clone.
 - **`git clone` from the coordinator**: smart-HTTP support at
   `http://coordinator:PORT/git/<id>` — read-only (upload-pack only, no
   push), gzip request bodies handled, refused for non-git workspaces.

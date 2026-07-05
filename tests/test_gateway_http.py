@@ -6174,3 +6174,64 @@ class TestGitSmartHTTP:
         finally:
             server.should_exit = True
             thread.join(timeout=5)
+
+
+class TestProjectContinuity:
+    """"project": <id> reuses a previous run's workspace so goals
+    accumulate on one project — one repo, growing history."""
+
+    def _dispatch(self, gateway, text):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return text
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+
+    def test_second_run_reuses_workspace_and_repo(self, gateway, client):
+        self._dispatch(gateway, "```python\nSTEP = 1\n```")
+        first = client.post("/api/orchestrate", json={
+            "goal": "step one",
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "app.py"}],
+        }).json()
+        pid = first["orchestration_id"]
+
+        self._dispatch(gateway, "```python\nSTEP = 2\n```")
+        second = client.post("/api/orchestrate", json={
+            "goal": "step two",
+            "project": pid,
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "app.py"}],
+        }).json()
+        # Same workspace, different run.
+        assert second["workspace_dir"] == first["workspace_dir"]
+        assert second["orchestration_id"] != pid
+
+        # History accumulated: both runs' commits in one repo, and the
+        # file's current content is the second run's.
+        commits = client.get(
+            f"/api/orchestrate/{pid}/git/log"
+        ).json()["commits"]
+        messages = [c["message"] for c in commits]
+        assert any("step one" in m for m in messages)
+        assert any("step two" in m for m in messages)
+        got = client.get(f"/api/orchestrate/{pid}/files/app.py")
+        assert got.text == "STEP = 2\n"
+
+    def test_project_and_workspace_dir_conflict(self, client, tmp_path):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "project": "abc",
+            "workspace_dir": str(tmp_path / "x"),
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        })
+        assert resp.status_code == 400
+        assert "not both" in resp.json()["error"]
+
+    def test_unknown_project_404(self, client):
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "project": "nope",
+            "tasks": [{"role": "coder", "prompt": "x"}],
+        })
+        assert resp.status_code == 404

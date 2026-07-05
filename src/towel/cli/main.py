@@ -2209,6 +2209,13 @@ def ask(
     ),
 )
 @click.option(
+    "--project", "project_id", default=None,
+    help=(
+        "Continue an existing project: reuse the workspace (and git "
+        "history) of a previous orchestration id."
+    ),
+)
+@click.option(
     "--file", "seed_files", multiple=True,
     help=(
         "Seed an existing file into the workspace before planning, so "
@@ -2232,6 +2239,7 @@ def orchestrate(
     repair: bool,
     watch: bool,
     attach_id: str | None,
+    project_id: str | None,
     seed_files: tuple[str, ...],
     as_json: bool,
 ) -> None:
@@ -2317,6 +2325,8 @@ def orchestrate(
                 body["workspace_dir"] = workspace_dir
             if seeds:
                 body["files"] = seeds
+            if project_id:
+                body["project"] = project_id
             console.print(
                 "[dim]No --task specs given — the fleet will plan the "
                 "subtasks itself.[/dim]"
@@ -2370,6 +2380,8 @@ def orchestrate(
 
     if seeds:
         body["files"] = seeds
+    if project_id:
+        body["project"] = project_id
 
     if watch:
         _watch_orchestrate(url, body, as_json)

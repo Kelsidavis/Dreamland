@@ -7750,20 +7750,62 @@ class GatewayServer:
                     status_code=400,
                 )
 
-            # Git history policy: managed workspaces get a repo
-            # automatically (they're ours); caller-supplied directories
-            # only with an explicit "git": true — never touch a user's
-            # directory uninvited. Read-only log/diff endpoints work on
-            # any workspace that already has a .git either way.
+            # Project continuity: "project": <existing orchestration
+            # id> reuses that run's workspace — the new run's commits
+            # land in the same repo, so a project accumulates history
+            # across goals and a clone stays `git pull`-able.
+            project_raw = body.get("project")
+            if project_raw is not None and not isinstance(project_raw, str):
+                return JSONResponse(
+                    {"error": "project must be an orchestration id string"},
+                    status_code=400,
+                )
+            if project_raw:
+                if workspace_dir is not None:
+                    return JSONResponse(
+                        {"error": (
+                            "pass either project or workspace_dir, not both"
+                        )},
+                        status_code=400,
+                    )
+                job = self._orchestrations.get(project_raw)
+                project_ws = (
+                    job.get("workspace_dir") if job is not None
+                    else (self._orch_history.get(project_raw) or {}).get(
+                        "workspace_dir"
+                    )
+                )
+                if not project_ws or not Path(project_ws).is_dir():
+                    return JSONResponse(
+                        {"error": (
+                            f"unknown project {project_raw!r} or its "
+                            "workspace no longer exists"
+                        )},
+                        status_code=404,
+                    )
+                workspace_dir = project_ws
+
+            # Git history policy: managed workspaces (and workspaces
+            # that already have a repo, e.g. continued projects) get
+            # snapshots automatically; other caller-supplied
+            # directories only with an explicit "git": true — never
+            # touch a user's directory uninvited. Read-only log/diff
+            # endpoints work on any workspace with a .git either way.
             git_raw = body.get("git")
             if git_raw is not None and not isinstance(git_raw, bool):
                 return JSONResponse(
                     {"error": "git must be a boolean"}, status_code=400,
                 )
-            workspace_was_explicit = workspace_dir is not None
-            git_enabled = (
-                git_raw if git_raw is not None else not workspace_was_explicit
-            )
+
+            def _git_enabled_for(ws: str) -> bool:
+                if git_raw is not None:
+                    return git_raw
+                p = Path(ws).resolve()
+                root = self.workspace_root.resolve()
+                return (
+                    p == root or root in p.parents
+                    or (p / ".git").is_dir()
+                )
 
             def _write_seed_files(ws: str) -> None:
                 from pathlib import Path as _Path
@@ -7790,6 +7832,7 @@ class GatewayServer:
                 oid = uuid.uuid4().hex[:12]
                 if workspace_dir is None:
                     workspace_dir = self._managed_workspace(oid)
+                git_enabled = _git_enabled_for(workspace_dir)
                 _write_seed_files(workspace_dir)
                 if git_enabled and seed_files_raw:
                     await self._git_commit_workspace(
@@ -7862,6 +7905,7 @@ class GatewayServer:
             oid = uuid.uuid4().hex[:12]
             if workspace_dir is None:
                 workspace_dir = self._managed_workspace(oid)
+            git_enabled = _git_enabled_for(workspace_dir)
             _write_seed_files(workspace_dir)
             job: dict[str, Any] = {
                 "goal": goal,

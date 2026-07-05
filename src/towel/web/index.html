@@ -480,6 +480,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
           </div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;
                       font-size:0.8em;margin-bottom:8px">
+            <label title="Reuse the selected run's workspace and git history — commits accumulate on one project"><input type="checkbox" id="orch-project-continue"> continue selected project</label>
             <label><input type="checkbox" id="orch-verify" checked> verify each task</label>
             <label><input type="checkbox" id="orch-repair" checked> audit + repair</label>
             <button class="tb-btn" id="orch-start-btn">start</button>
@@ -1486,7 +1487,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       repair: document.getElementById('orch-repair').checked,
     };
     const ws = document.getElementById('orch-workspace').value.trim();
-    if (ws) body.workspace_dir = ws;
+    const contd = document.getElementById('orch-project-continue').checked;
+    const sel = document.getElementById('orch-history-select').value;
+    if (contd && sel) {
+      body.project = sel;      // reuse that run's workspace + history
+    } else if (ws) {
+      body.workspace_dir = ws;
+    }
     if (Object.keys(orchSeeds).length) body.files = orchSeeds;
     const data = await apiPost('/api/orchestrate', body);
     if (data.error) { alert('Orchestration failed to start: ' + data.error); return; }

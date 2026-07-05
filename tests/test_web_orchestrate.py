@@ -162,3 +162,11 @@ class TestCloneCommand:
     def test_history_shows_clone_command(self):
         assert "git clone " in HTML
         assert "clone_path" in HTML
+
+
+class TestProjectContinueUI:
+    def test_checkbox_exists(self):
+        assert "orch-project-continue" in HTML
+
+    def test_sends_project_when_checked(self):
+        assert "body.project = sel" in HTML

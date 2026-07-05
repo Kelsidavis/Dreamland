@@ -433,3 +433,24 @@ class TestSeedFilesCLI:
         assert result.exit_code != 0
         assert not posted
         assert "not found" in result.output
+
+
+class TestProjectFlag:
+    def test_project_sent_in_body(self) -> None:
+        runner = CliRunner()
+        captured: dict = {}
+
+        def fake_post(url: str, json: dict, timeout=None) -> object:  # noqa: ARG001
+            captured["json"] = json
+            return _mock_response({
+                "goal": "g", "success": True, "total_elapsed_ms": 0,
+                "synthesis": "", "tasks": [],
+            })
+
+        with patch("httpx.post", side_effect=fake_post):
+            result = runner.invoke(cli, [
+                "orchestrate", "--goal", "iterate",
+                "--project", "abc123def456",
+            ])
+        assert result.exit_code == 0, result.output
+        assert captured["json"]["project"] == "abc123def456"
