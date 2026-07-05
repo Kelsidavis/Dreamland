@@ -3051,6 +3051,13 @@ class GatewayServer:
             return False
         return local_b >= 2 * max(known)
 
+    def prefers_local_judgment(self) -> bool:
+        """Whether judgment-type dispatches (task_type=plan: planning,
+        goal audits) will be served by the coordinator's own model.
+        The orchestrator uses this to size its audit panel — one
+        strong local judge instead of a multi-worker vote."""
+        return self._should_plan_locally()
+
     async def _local_role_inference(
         self,
         role_system: str,

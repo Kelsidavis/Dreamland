@@ -226,6 +226,13 @@ ROLE_PROMPTS: dict[str, str] = {
         "fences, no explanations, no checklists. Your entire response must be "
         "parseable by json.loads."
     ),
+    "auditor": (
+        "You are a rigorous delivery auditor. You judge whether completed "
+        "work achieves its stated goal, strictly from the evidence "
+        "presented — execution output is ground truth, claims are not. "
+        "You never speculate about content you cannot see, and you answer "
+        "in exactly the verdict format requested."
+    ),
     "tester": (
         "You are a QA engineer. Write comprehensive tests covering edge cases, error "
         "conditions, and typical usage. Use the appropriate testing framework."
@@ -250,6 +257,12 @@ ROLE_PROMPTS: dict[str, str] = {
 ROLE_TASK_TYPES: dict[str, str] = {
     "architect": "plan",
     "planner": "plan",
+    # Goal audits are judgment, like planning — the "plan" task type
+    # routes them to the highest-quality worker AND makes them eligible
+    # for the coordinator-local big-model path. Per-task verifies keep
+    # the "reviewer" role (code_review) so the volume stays on the
+    # fleet.
+    "auditor": "plan",
     "coder": "generate",
     "researcher": "research",
     "reviewer": "code_review",
@@ -897,7 +910,10 @@ class Orchestrator:
         # Python file was expected). "default" adds nothing over the
         # specific roles. Keep both out of the menu.
         roles = ", ".join(
-            sorted(r for r in ROLE_PROMPTS if r not in ("default", "planner"))
+            sorted(
+                r for r in ROLE_PROMPTS
+                if r not in ("default", "planner", "auditor")
+            )
         )
         return (
             f"Available roles: {roles}.\n\n"
@@ -1050,8 +1066,10 @@ class Orchestrator:
             if not isinstance(entry, dict):
                 raise ValueError(f"tasks[{i}] must be a JSON object")
             role = entry.get("role")
-            if role not in ROLE_PROMPTS or role == "planner":
-                valid = sorted(r for r in ROLE_PROMPTS if r != "planner")
+            if role not in ROLE_PROMPTS or role in ("planner", "auditor"):
+                valid = sorted(
+                    r for r in ROLE_PROMPTS if r not in ("planner", "auditor")
+                )
                 raise ValueError(
                     f"tasks[{i}].role={role!r} is not usable in a plan; "
                     f"valid roles: {valid}"
@@ -1458,7 +1476,17 @@ class Orchestrator:
             "ACHIEVED' or 'VERDICT: INCOMPLETE — <each concrete gap "
             "and which file/task it concerns>'."
         )
-        panel = min(3, self._concurrency_slots())
+        # Panel sizing: one strong judge beats three weak votes. When
+        # the dispatcher reports judgment calls land on the
+        # coordinator's big model (see the local-planner path), a
+        # single vote suffices — and avoids serializing three large
+        # generations on the local runtime. Otherwise vote with up to
+        # three fleet workers.
+        local_judge = getattr(self.dispatcher, "prefers_local_judgment", None)
+        if callable(local_judge) and local_judge():
+            panel = 1
+        else:
+            panel = min(3, self._concurrency_slots())
         votes = await asyncio.gather(
             *[self._audit_once(prompt) for _ in range(panel)],
         )
@@ -1484,7 +1512,7 @@ class Orchestrator:
         (None, note) for unavailable/unparseable."""
         import re
         try:
-            text = await self._run_agent("reviewer", prompt)
+            text = await self._run_agent("auditor", prompt)
         except Exception as exc:
             log.warning("check_goal: auditor unavailable: %s", exc)
             return None, f"goal audit unavailable: {exc}"

@@ -5342,7 +5342,7 @@ class TestOrchestrateGoalCheck:
             role, role_system, prompt, *, session_id, max_tokens, temperature,
             with_tools, task_type, exclude_workers,
         ):
-            if role == "reviewer":
+            if role in ("reviewer", "auditor"):
                 return "VERDICT: ACHIEVED"
             return "done"
 
@@ -5366,7 +5366,7 @@ class TestOrchestrateGoalCheck:
             with_tools, task_type, exclude_workers,
         ):
             calls.append(role)
-            if role == "reviewer":
+            if role in ("reviewer", "auditor"):
                 return "VERDICT: ACHIEVED"
             return "done"
 
@@ -5379,7 +5379,7 @@ class TestOrchestrateGoalCheck:
         })
         assert resp.status_code == 200
         # The audit ran even though goal_check wasn't set explicitly.
-        assert "reviewer" in calls
+        assert "auditor" in calls
         assert resp.json()["goal_achieved"] is True
 
     def test_goal_check_absent_returns_null_verdict(self, gateway, client):

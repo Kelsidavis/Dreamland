@@ -1243,7 +1243,7 @@ class TestGoalCheckAndRepair:
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
                 self.calls.append({"role": role, "prompt": prompt})
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     return "VERDICT: ACHIEVED"
                 return "done"
 
@@ -1257,7 +1257,7 @@ class TestGoalCheckAndRepair:
         assert result.goal_feedback == ""
         assert result.repair_tasks_added == 0
         audit = dispatcher.calls[-1]
-        assert audit["role"] == "reviewer"
+        assert audit["role"] == "auditor"
         assert "the goal" in audit["prompt"]
         # The audit prompt carries the ground-truth digest.
         assert "task 0 (coder)" in audit["prompt"]
@@ -1293,7 +1293,7 @@ class TestGoalCheckAndRepair:
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
                 self.roles.append(role)
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.audits += 1
                     if self.audits == 1:
                         return "VERDICT: INCOMPLETE — missing goodbye() in app.py"
@@ -1340,7 +1340,7 @@ class TestGoalCheckAndRepair:
             ) -> str:
                 if role == "planner":
                     self.planner_called = True
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     return "VERDICT: ACHIEVED"
                 return "done"
 
@@ -1362,7 +1362,7 @@ class TestGoalCheckAndRepair:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     raise WorkerDispatchError("no worker")
                 return "done"
 
@@ -1384,7 +1384,7 @@ class TestGoalCheckAndRepair:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     return "VERDICT: INCOMPLETE — gap X"
                 if role == "planner":
                     return "utter nonsense"
@@ -1417,7 +1417,7 @@ class TestGoalCheckAndRepair:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.audits += 1
                     if self.audits == 1:
                         return "VERDICT: INCOMPLETE — app.py lacks goodbye()"
@@ -1678,7 +1678,7 @@ class TestAuditPanel:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.reviews += 1
                     if self.reviews == 2:
                         return "VERDICT: INCOMPLETE — hallucinated gap"
@@ -1708,7 +1708,7 @@ class TestAuditPanel:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.reviews += 1
                     if self.reviews == 1:
                         return "VERDICT: ACHIEVED"
@@ -1740,7 +1740,7 @@ class TestAuditPanel:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.reviews += 1
                     return "VERDICT: ACHIEVED"
                 return "done"
@@ -1815,7 +1815,7 @@ class TestRefreshRunOutputs:
                 self, role, role_system, prompt, *, session_id, max_tokens,
                 temperature, with_tools, task_type, exclude_workers,
             ) -> str:
-                if role == "reviewer":
+                if role in ("reviewer", "auditor"):
                     self.audit_prompt = prompt
                     return "VERDICT: ACHIEVED"
                 return "```python\nimport lib\nprint(lib.VALUE)\n```"
@@ -1947,3 +1947,64 @@ class TestSiblingImportRace:
         assert tasks[1].attempts == 1
         # Blame routed to the sibling for the repair planner.
         assert "lib.py must be corrected" in tasks[1].result
+
+
+class TestLocalJudgePanel:
+    def test_panel_shrinks_to_one_local_judge(self):
+        """When the dispatcher reports judgment lands on the local big
+        model, one vote suffices — no serialized triple generation."""
+        from towel.config import TowelConfig
+
+        class _BigCoordinator:
+            def __init__(self) -> None:
+                self.audits = 0
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            def prefers_local_judgment(self) -> bool:
+                return True
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "auditor":
+                    self.audits += 1
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _BigCoordinator()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
+        assert result.goal_achieved is True
+        assert dispatcher.audits == 1
+
+    def test_panel_votes_when_judgment_stays_on_fleet(self):
+        from towel.config import TowelConfig
+
+        class _SmallFleet:
+            def __init__(self) -> None:
+                self.audits = 0
+
+            def available_worker_count(self) -> int:
+                return 3
+
+            def prefers_local_judgment(self) -> bool:
+                return False
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                if role == "auditor":
+                    self.audits += 1
+                    return "VERDICT: ACHIEVED"
+                return "done"
+
+        dispatcher = _SmallFleet()
+        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        tasks = [AgentTask(role="coder", prompt="x")]
+        asyncio.run(orch.run_goal("g", tasks, goal_check=True))
+        assert dispatcher.audits == 3
