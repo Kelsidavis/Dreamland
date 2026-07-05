@@ -8,6 +8,14 @@ a glance whether a release affects you.
 
 ### Renamed: Towel → Dreamland (2026-07-05)
 
+The Projects experience got a first-class panel: 🛸 **projects** in
+the toolbar (Ctrl+Shift+P, `#projects` deep link) opens a dedicated
+two-column workspace — build composer and clickable run cards (state,
+goal-audit mark, task counts, live-refreshing) on the left; attached
+run detail with task cards, file explorer, zip download, and git
+history on the right. The fleet panel returns to pure operations.
+Panels are deep-linkable (`#projects`, `#fleet`).
+
 The web UI got a matching visual identity: a new default **dreamland**
 theme (night-desert indigo, radar-phosphor green, warning-amber),
 hazard-stripe accents, a radar-blip connection pulse, a starfield

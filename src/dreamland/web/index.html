@@ -143,6 +143,38 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   font-family:var(--mono); transition:border-color .2s,color .2s; }
 .tb-btn:hover { border-color:var(--green); color:var(--green); }
 
+/* Projects panel */
+#projects-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.54); z-index:1100;
+  display:none; align-items:center; justify-content:center; }
+#projects-overlay.visible { display:flex; }
+#projects-panel { width:min(1180px, 96vw); max-height:90vh; overflow:hidden;
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:14px;
+  display:flex; flex-direction:column; box-shadow:0 18px 60px rgba(0,0,0,.5); }
+#projects-header { display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px; border-bottom:1px solid var(--border); position:relative; }
+#projects-header::after { content:""; position:absolute; left:0; right:0; bottom:-1px;
+  height:3px; background:var(--hazard); opacity:.4; pointer-events:none; }
+#projects-title strong { color:var(--green); font-family:var(--mono); font-size:14px;
+  letter-spacing:.12em; }
+#projects-subtitle { color:var(--text-dim); font-size:11px; font-family:var(--mono); }
+#projects-body { display:grid; grid-template-columns: 340px 1fr; gap:0; min-height:0;
+  flex:1; }
+.projects-col { min-height:0; overflow:auto; padding:16px; }
+.projects-col + .projects-col { border-left:1px solid var(--border); }
+.projects-col h3 { font-family:var(--mono); font-size:12px; color:var(--cyan);
+  margin-bottom:10px; letter-spacing:.06em; text-transform:uppercase; }
+.run-card { background:var(--bg-input); border:1px solid var(--border);
+  border-radius:10px; padding:9px 11px; cursor:pointer; margin-bottom:8px;
+  font-family:var(--mono); font-size:11px; transition:border-color .15s; }
+.run-card:hover { border-color:var(--green-dim); }
+.run-card.active { border-color:var(--green); box-shadow: var(--glow); }
+.run-card .rc-top { display:flex; justify-content:space-between; gap:8px;
+  margin-bottom:4px; }
+.run-card .rc-state { font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
+.run-card .rc-goal { color:var(--text); line-height:1.35; }
+.run-card .rc-meta { color:var(--text-dim); font-size:10px; margin-top:4px; }
+#orch-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  margin:10px 0; }
 /* Fleet panel */
 #fleet-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.54); z-index:1100;
   display:none; align-items:center; justify-content:center; padding:32px;
@@ -513,64 +545,6 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       </div>
       <div class="fleet-col">
         <div class="fleet-section">
-          <h3>Orchestrate</h3>
-          <textarea id="orch-goal" rows="3"
-                    placeholder="Goal — the fleet plans, executes across workers, verifies, and repairs. e.g. Create stats.py with mean/median functions and a demo main block."
-                    style="width:100%;background:var(--bg-input);color:var(--text);
-                           border:1px solid var(--border);border-radius:4px;
-                           padding:6px 8px;margin-bottom:6px;font-family:var(--mono);
-                           font-size:0.8em;resize:vertical"></textarea>
-          <input type="text" id="orch-workspace"
-                 placeholder="workspace dir (optional — default: managed workspace, browse it below)"
-                 style="width:100%;background:var(--bg-input);color:var(--text);
-                        border:1px solid var(--border);border-radius:4px;
-                        padding:6px 8px;margin-bottom:6px;font-family:var(--mono);
-                        font-size:0.8em">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-                      margin-bottom:6px">
-            <button class="tb-btn" id="orch-addfiles-btn"
-                    title="Seed existing code files into the workspace so the goal modifies them instead of starting from scratch">+ seed files</button>
-            <span id="orch-seed-list" style="display:flex;gap:6px;flex-wrap:wrap;
-                  font-family:var(--mono);font-size:10px"></span>
-            <input type="file" id="orch-file-input" multiple style="display:none">
-          </div>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;
-                      font-size:0.8em;margin-bottom:8px">
-            <label title="Reuse the selected run's workspace and git history — commits accumulate on one project"><input type="checkbox" id="orch-project-continue"> continue selected project</label>
-            <label><input type="checkbox" id="orch-verify" checked> verify each task</label>
-            <label><input type="checkbox" id="orch-repair" checked> audit + repair</label>
-            <button class="tb-btn" id="orch-start-btn">start</button>
-            <button class="tb-btn" id="orch-cancel-btn" style="display:none;color:var(--red)">cancel</button>
-          </div>
-          <div id="orch-status" style="font-family:var(--mono);font-size:11px;
-                                       color:var(--text-dim);margin-bottom:8px"></div>
-          <div class="fleet-list" id="orch-tasks"></div>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
-            <select id="orch-history-select"
-                    style="flex:1;min-width:160px;background:var(--bg-input);
-                           color:var(--text);border:1px solid var(--border);
-                           border-radius:4px;padding:5px 6px;
-                           font-family:var(--mono);font-size:0.75em">
-              <option value="">— current / pick a past run —</option>
-            </select>
-            <button class="tb-btn" id="orch-files-btn"
-                    title="Browse the project files this run produced">files</button>
-            <button class="tb-btn" id="orch-download-btn"
-                    title="Download the whole workspace as a zip">↓ zip</button>
-            <button class="tb-btn" id="orch-git-btn"
-                    title="Project commit history — every run is a commit">history</button>
-          </div>
-          <div class="fleet-list" id="orch-files-list" style="margin-top:8px"></div>
-          <div id="orch-file-head" style="display:none;font-family:var(--mono);
-               font-size:11px;color:var(--cyan);margin-top:8px"></div>
-          <pre id="orch-file-view"
-               style="display:none;background:var(--bg-input);
-                      border:1px solid var(--border);border-radius:8px;
-                      padding:10px;margin-top:4px;max-height:320px;
-                      overflow:auto;font-family:var(--mono);font-size:11px;
-                      color:var(--text);white-space:pre"></pre>
-        </div>
-        <div class="fleet-section">
           <h3>Routes</h3>
           <div class="fleet-list" id="fleet-routes-list"></div>
         </div>
@@ -607,6 +581,79 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   </div>
 </div>
 
+<div id="projects-overlay">
+  <div id="projects-panel">
+    <div id="projects-header">
+      <div id="projects-title">
+        <strong>PROJECTS</strong>
+        <div id="projects-subtitle">Goal in, verified build out — every run is a commit.</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="tb-btn" id="projects-refresh-btn" title="Refresh run list">refresh</button>
+        <button class="tb-btn" id="projects-close-btn" title="Close projects panel">close</button>
+      </div>
+    </div>
+    <div id="projects-body">
+      <div class="projects-col">
+        <h3>New build</h3>
+        <textarea id="orch-goal" rows="3"
+                  placeholder="Goal — the fleet plans, builds, verifies, and repairs. e.g. Create stats.py with mean/median functions and a demo main block."
+                  style="width:100%;background:var(--bg-input);color:var(--text);
+                         border:1px solid var(--border);border-radius:8px;
+                         padding:8px 10px;margin-bottom:8px;font-family:var(--mono);
+                         font-size:0.8em;resize:vertical"></textarea>
+        <input type="text" id="orch-workspace"
+               placeholder="workspace dir (optional — default: managed)"
+               style="width:100%;background:var(--bg-input);color:var(--text);
+                      border:1px solid var(--border);border-radius:8px;
+                      padding:7px 10px;margin-bottom:8px;font-family:var(--mono);
+                      font-size:0.8em">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button class="tb-btn" id="orch-addfiles-btn"
+                  title="Seed existing code files so the goal modifies them instead of starting from scratch">+ seed files</button>
+          <span id="orch-seed-list" style="display:flex;gap:6px;flex-wrap:wrap;
+                font-family:var(--mono);font-size:10px"></span>
+          <input type="file" id="orch-file-input" multiple style="display:none">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:0.8em;margin-bottom:10px">
+          <label title="Reuse the selected run's workspace and git history — commits accumulate on one project"><input type="checkbox" id="orch-project-continue"> continue selected project</label>
+          <label><input type="checkbox" id="orch-verify" checked> verify each task</label>
+          <label><input type="checkbox" id="orch-repair" checked> audit + repair</label>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="tb-btn" id="orch-start-btn" style="color:var(--green)">▸ start build</button>
+          <button class="tb-btn" id="orch-cancel-btn" style="display:none;color:var(--red)">cancel</button>
+        </div>
+        <h3>Runs</h3>
+        <div id="orch-runs-list"></div>
+      </div>
+      <div class="projects-col">
+        <div id="orch-status" style="font-family:var(--mono);font-size:11px;
+                                     color:var(--text-dim);margin-bottom:8px">
+          No run attached — start a build or pick one on the left.</div>
+        <div class="fleet-list" id="orch-tasks"></div>
+        <div id="orch-actions">
+          <button class="tb-btn" id="orch-files-btn"
+                  title="Browse the project files this run produced">files</button>
+          <button class="tb-btn" id="orch-download-btn"
+                  title="Download the whole workspace as a zip">↓ zip</button>
+          <button class="tb-btn" id="orch-git-btn"
+                  title="Project commit history — every run is a commit">history</button>
+        </div>
+        <div class="fleet-list" id="orch-files-list"></div>
+        <div id="orch-file-head" style="display:none;font-family:var(--mono);
+             font-size:11px;color:var(--cyan);margin-top:8px"></div>
+        <pre id="orch-file-view"
+             style="display:none;background:var(--bg-input);
+                    border:1px solid var(--border);border-radius:8px;
+                    padding:10px;margin-top:4px;max-height:420px;
+                    overflow:auto;font-family:var(--mono);font-size:11px;
+                    color:var(--text);white-space:pre"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="sidebar">
   <div id="sidebar-header">
     <h1><span class="glyph">▲▲</span>DREAMLAND</h1>
@@ -625,6 +672,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   <div id="toolbar">
     <div class="session-info" id="session-info"></div>
     <div class="actions">
+      <button class="tb-btn" id="tb-projects" title="Projects: goal-driven builds, files, git history (Ctrl+Shift+P)">🛸 projects</button>
       <button class="tb-btn" id="tb-fleet" title="Open worker and route controls">fleet</button>
       <button class="tb-btn" id="tb-memory" title="View persistent memory: stats, recent captures, search">memory</button>
       <button class="tb-btn" id="tb-replay" title="Replay any saved conversation step-by-step with play/pause/scrub">replay</button>
@@ -636,8 +684,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   <div id="messages">
     <div id="welcome">
       <h2>DREAMLAND</h2>
-      <p class="motto">Restricted Airspace — Local AI Build Fleet · It doesn't exist.</p>
-      <p class="hint">Your local-first AI assistant.<br>Type a message to begin.</p>
+      <p class="motto">It doesn't exist.</p>
+      <p class="hint">Your local-first AI build fleet.<br>Type a message to begin.</p>
     </div>
   </div>
   <div id="input-area">
@@ -1349,10 +1397,30 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   let fleetRefreshTimer = null;
   const FLEET_REFRESH_INTERVAL_MS = 5000;
 
+  const projectsOverlay = document.getElementById('projects-overlay');
+  let projectsRefreshTimer = null;
+
+  function openProjectsPanel() {
+    projectsOverlay.classList.add('visible');
+    orchRunsRefresh().then(orchAutoAttach);
+    if (projectsRefreshTimer === null) {
+      projectsRefreshTimer = setInterval(function() {
+        if (projectsOverlay.classList.contains('visible')) orchRunsRefresh();
+      }, 5000);
+    }
+  }
+
+  function closeProjectsPanel() {
+    projectsOverlay.classList.remove('visible');
+    if (projectsRefreshTimer !== null) {
+      clearInterval(projectsRefreshTimer);
+      projectsRefreshTimer = null;
+    }
+  }
+
   function openFleetPanel() {
     fleetOverlay.classList.add('visible');
     loadFleetState();
-    orchHistoryRefresh().then(orchAutoAttach);
     if (fleetRefreshTimer === null) {
       fleetRefreshTimer = setInterval(function() {
         if (fleetOverlay.classList.contains('visible')) {
@@ -1468,15 +1536,12 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   // before a reload), otherwise show the most recent run's outcome.
   async function orchAutoAttach() {
     if (orchId) return;
-    try {
-      const data = await apiGet('/api/orchestrations?limit=20');
-      const runs = data.orchestrations || [];
-      if (!runs.length) return;
-      const running = runs.find(function(r) { return r.state === 'running'; });
-      const target = (running || runs[0]).orchestration_id;
-      document.getElementById('orch-history-select').value = target;
-      await orchAttach(target);
-    } catch (e) { /* no history — panel stays blank */ }
+    if (!orchRuns.length) return;
+    const running = orchRuns.find(function(r) { return r.state === 'running'; });
+    const target = (running || orchRuns[0]).orchestration_id;
+    orchSelectedId = target;
+    orchRunsRender();
+    await orchAttach(target);
   }
 
   function orchStop() {
@@ -1550,9 +1615,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     };
     const ws = document.getElementById('orch-workspace').value.trim();
     const contd = document.getElementById('orch-project-continue').checked;
-    const sel = document.getElementById('orch-history-select').value;
-    if (contd && sel) {
-      body.project = sel;      // reuse that run's workspace + history
+    if (contd && orchSelectedId) {
+      body.project = orchSelectedId;   // reuse workspace + history
     } else if (ws) {
       body.workspace_dir = ws;
     }
@@ -1562,6 +1626,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     orchSeeds = {};
     orchRenderSeeds();
     orchId = data.orchestration_id;
+    orchSelectedId = orchId;
+    orchRunsRefresh();
     document.getElementById('orch-status').textContent = 'running: submitted (planning…)';
     document.getElementById('orch-tasks').innerHTML = '';
     document.getElementById('orch-cancel-btn').style.display = '';
@@ -1580,24 +1646,56 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   // Browses the workspace an orchestration produced, via
   // /api/orchestrate/<id>/files — the same endpoints external systems
   // use to pull build artifacts.
-  async function orchHistoryRefresh() {
-    const sel = document.getElementById('orch-history-select');
+  let orchSelectedId = null;
+  let orchRuns = [];
+
+  async function orchRunsRefresh() {
     try {
-      const data = await apiGet('/api/orchestrations?limit=20');
-      const runs = data.orchestrations || [];
-      const current = sel.value;
-      sel.innerHTML = '<option value="">— current / pick a past run —</option>' +
-        runs.map(function(r) {
-          return '<option value="' + orchEsc(r.orchestration_id) + '">' +
-            orchEsc((r.state || '?') + ' · ' + (r.goal || '').slice(0, 60)) +
-            '</option>';
-        }).join('');
-      sel.value = current;
+      const data = await apiGet('/api/orchestrations?limit=30');
+      orchRuns = data.orchestrations || [];
     } catch (e) { /* panel still usable without history */ }
+    orchRunsRender();
+  }
+
+  function orchRunsRender() {
+    const listEl = document.getElementById('orch-runs-list');
+    if (!orchRuns.length) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);' +
+        'font-family:var(--mono)">No runs yet — start your first build.</div>';
+      return;
+    }
+    const stateColor = {completed:'var(--green)', running:'var(--cyan)',
+      failed:'var(--red)', cancelled:'var(--yellow)', interrupted:'var(--yellow)'};
+    listEl.innerHTML = orchRuns.map(function(r) {
+      const id = r.orchestration_id;
+      const audit = r.goal_achieved === true ? ' ✓ goal'
+        : r.goal_achieved === false ? ' ✗ goal' : '';
+      const when = (r.created_at || '').slice(5, 16).replace('T', ' ');
+      return '<div class="run-card' + (id === orchSelectedId ? ' active' : '') +
+        '" data-run="' + orchEsc(id) + '">' +
+        '<div class="rc-top"><span class="rc-state" style="color:' +
+        (stateColor[r.state] || 'var(--text-dim)') + '">' + orchEsc(r.state || '?') +
+        audit + '</span><span style="color:var(--text-dim)">' + when + '</span></div>' +
+        '<div class="rc-goal">' + orchEsc((r.goal || '').slice(0, 90)) + '</div>' +
+        '<div class="rc-meta">' + (r.tasks_completed || 0) + '/' +
+        (r.tasks_total || 0) + ' tasks · ' + orchEsc(id) + '</div></div>';
+    }).join('');
+    listEl.querySelectorAll('.run-card').forEach(function(card) {
+      card.addEventListener('click', function() {
+        orchSelectRun(card.dataset.run);
+      });
+    });
+  }
+
+  function orchSelectRun(id) {
+    orchSelectedId = id;
+    orchRunsRender();
+    orchStop();
+    orchAttach(id);
   }
 
   function orchFileTargetId() {
-    return document.getElementById('orch-history-select').value || orchId;
+    return orchSelectedId || orchId;
   }
 
   async function orchFilesLoad() {
@@ -2698,10 +2796,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     window.location.href = apiBase + '/api/orchestrate/' +
       encodeURIComponent(id) + '/archive';
   });
-  document.getElementById('orch-history-select').addEventListener('change',function(){
-    const id = this.value;
-    if (id) { orchStop(); orchAttach(id); }
-  });
+  document.getElementById('tb-projects').addEventListener('click',openProjectsPanel);
+  // Deep links: #projects / #fleet open their panels on load, so
+  // panels are bookmarkable and shareable across the LAN.
+  if (location.hash === '#projects') setTimeout(openProjectsPanel, 300);
+  if (location.hash === '#fleet') setTimeout(openFleetPanel, 300);
+  document.getElementById('projects-close-btn').addEventListener('click',closeProjectsPanel);
+  document.getElementById('projects-refresh-btn').addEventListener('click',orchRunsRefresh);
 
   // ── Memory panel ──────────────────────────────────────────────────
   const memoryOverlay = document.getElementById('memory-overlay');
@@ -3586,6 +3687,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     }
     if(e.key==='Escape'&&memoryInspectOverlay.style.display==='flex'){memoryInspectOverlay.style.display='none'; return;}
     if(e.key==='Escape'&&memoryOverlay.style.display==='flex'){closeMemoryPanel(); return;}
+    if(e.key==='Escape'&&projectsOverlay.classList.contains('visible')){closeProjectsPanel(); return;}
     if(e.key==='Escape'&&fleetOverlay.classList.contains('visible')){closeFleetPanel(); return;}
     if(e.key==='Escape'&&isStreaming)stopGeneration();
   });
@@ -3602,6 +3704,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     {icon:'✚', label:'New Chat', hint:'Ctrl+N', action:()=>startNewChat()},
     {icon:'🔍', label:'Search Conversations', hint:'Ctrl+K', action:()=>{closePalette();convSearchEl.focus();convSearchEl.select();}},
     {icon:'🎨', label:'Cycle Theme', hint:'Ctrl+T', action:()=>cycleTheme()},
+    {icon:'🛸', label:'Projects', hint:'Ctrl+Shift+P', action:()=>openProjectsPanel()},
     {icon:'🛰', label:'Fleet Control', hint:'Ctrl+Shift+F', action:()=>openFleetPanel()},
     {icon:'📤', label:'Export Conversation', hint:'Ctrl+E', action:()=>exportConversation()},
     {icon:'🗑', label:'Delete Conversation', hint:'', action:()=>deleteCurrentConversation()},
@@ -3687,6 +3790,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     if((e.ctrlKey||e.metaKey)&&e.key==='t'){e.preventDefault();cycleTheme();}
     // Ctrl/Cmd+Shift+F — fleet control
     if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='f'){e.preventDefault();openFleetPanel();}
+    if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='p'){e.preventDefault();openProjectsPanel();}
   });
 
   // ── Init ──

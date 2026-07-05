@@ -42,7 +42,7 @@ class TestOrchestratePanel:
 class TestFileExplorer:
     def test_explorer_elements_exist(self):
         for element_id in (
-            "orch-history-select",
+            "orch-runs-list",
             "orch-files-btn",
             "orch-files-list",
             "orch-file-view",
@@ -70,15 +70,15 @@ class TestResumeAcrossMachines:
         assert "orchAutoAttach" in HTML
 
     def test_panel_open_auto_attaches(self):
-        assert "orchHistoryRefresh().then(orchAutoAttach)" in HTML
+        assert "orchRunsRefresh().then(orchAutoAttach)" in HTML
 
     def test_running_run_preferred(self):
         assert "r.state === 'running'" in HTML
 
-    def test_history_select_loads_run(self):
-        # Selecting a past run attaches to it (status + tasks), not
-        # just the file browser.
-        assert "orchStop(); orchAttach(id);" in HTML
+    def test_run_card_click_attaches(self):
+        # Clicking a run card attaches to it (status + tasks + files).
+        assert "orchSelectRun" in HTML
+        assert "orchAttach(id)" in HTML
 
 
 class TestChatSessionResume:
@@ -169,7 +169,7 @@ class TestProjectContinueUI:
         assert "orch-project-continue" in HTML
 
     def test_sends_project_when_checked(self):
-        assert "body.project = sel" in HTML
+        assert "body.project = orchSelectedId" in HTML
 
 
 class TestDreamlandTheme:
@@ -187,3 +187,30 @@ class TestDreamlandTheme:
 
     def test_favicon_present(self):
         assert 'rel="icon"' in HTML
+
+
+class TestProjectsPanel:
+    """The Projects panel is the first-class surface for goal-driven
+    builds — composer + runs list on the left, live run detail with
+    files/history on the right."""
+
+    def test_panel_elements_exist(self):
+        for element_id in (
+            "projects-overlay",
+            "projects-panel",
+            "tb-projects",
+            "projects-close-btn",
+            "projects-refresh-btn",
+            "orch-runs-list",
+        ):
+            assert element_id in HTML, f"missing #{element_id}"
+
+    def test_orchestrate_left_fleet_panel(self):
+        # The fleet panel no longer hosts the orchestrate section.
+        fleet = HTML.split('id="fleet-panel"')[1].split('id="projects-overlay"')[0]
+        assert "orch-goal" not in fleet
+        assert "Orchestrate</h3>" not in fleet
+
+    def test_shortcut_and_palette(self):
+        assert "Ctrl+Shift+P" in HTML
+        assert "openProjectsPanel()" in HTML
