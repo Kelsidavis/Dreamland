@@ -1,4 +1,4 @@
-"""Tests for the `towel orchestrate` CLI command.
+"""Tests for the `dreamland orchestrate` CLI command.
 
 Mocks the gateway HTTP call so we exercise the spec parser, the
 plan-file loader, and the response renderer without needing a live
@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from towel.cli.main import cli
+from dreamland.cli.main import cli
 
 
 def _mock_response(payload: dict, status_code: int = 200) -> object:

@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class _FakeAgent:
@@ -30,7 +30,7 @@ def gateway(store):
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
     return GatewayServer(
-        config=TowelConfig(),
+        config=DreamlandConfig(),
         agent=_FakeAgent(),
         sessions=sessions,
         pin_store=pin_store,

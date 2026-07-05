@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from towel.skills.builtin.git import GitSkill
+from dreamland.skills.builtin.git import GitSkill
 
 
 @pytest.fixture

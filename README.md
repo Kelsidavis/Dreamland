@@ -1,6 +1,6 @@
-# Towel
+# Dreamland
 
-[![CI](https://github.com/Kelsidavis/Towel/actions/workflows/ci.yml/badge.svg)](https://github.com/Kelsidavis/Towel/actions/workflows/ci.yml)
+[![CI](https://github.com/Kelsidavis/Dreamland/actions/workflows/ci.yml/badge.svg)](https://github.com/Kelsidavis/Dreamland/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-MLX-black?logo=apple)](https://ml-explore.github.io/mlx/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -8,23 +8,23 @@
 [![Tests](https://img.shields.io/badge/tests-1350%2B%20passing-brightgreen)]()
 [![Skills](https://img.shields.io/badge/skills-100%2B%20built--in-blue)]()
 
-**Don't Panic.**
+**It doesn't exist.**
 
-> **Towel** — **T**ool **O**riented **W**orker **E**xecution **L**ink
+> **Dreamland** — the classified build site for your local AI fleet
 
 A local AI assistant powered by MLX. Private, fast, extensible, and local-first.
-Towel is best on Apple Silicon, and also supports Linux.
+Dreamland is best on Apple Silicon, and also supports Linux.
 
 ## Quick Start
 
 ```bash
 pip install -e ".[all]"
-towel setup    # browser GUI — pick backend (MLX / Ollama / llama-server / Claude) + model
-towel chat     # start chatting
+dreamland setup    # browser GUI — pick backend (MLX / Ollama / llama-server / Claude) + model
+dreamland chat     # start chatting
 ```
 
-Skipping setup? `towel init` writes a starter `~/.towel/config.toml` you can edit by hand.
-Or run `towel doctor` any time to verify the environment.
+Skipping setup? `dreamland init` writes a starter `~/.dreamland/config.toml` you can edit by hand.
+Or run `dreamland doctor` any time to verify the environment.
 
 Launch scripts:
 
@@ -33,39 +33,39 @@ Launch scripts:
 ./launch.command  # macOS double-click friendly
 ```
 
-## What Can Towel Do?
+## What Can Dreamland Do?
 
 ### Chat
 
 ```bash
-towel chat                  # interactive chat with streaming
-towel ask "explain monads"  # one-shot query (pipeable)
-cat code.py | towel ask "review this"
+dreamland chat                  # interactive chat with streaming
+dreamland ask "explain monads"  # one-shot query (pipeable)
+cat code.py | dreamland ask "review this"
 ```
 
 ### Developer CLI
 
 ```bash
-towel review                # AI code review of git changes
-towel review --staged       # review only staged changes
-towel review -f security    # focus on security issues
-towel commit                # generate commit message + commit
-towel commit -a             # stage all and commit
-towel watch src/*.py        # live feedback on file changes
+dreamland review                # AI code review of git changes
+dreamland review --staged       # review only staged changes
+dreamland review -f security    # focus on security issues
+dreamland commit                # generate commit message + commit
+dreamland commit -a             # stage all and commit
+dreamland watch src/*.py        # live feedback on file changes
 ```
 
 ### Conversation Management
 
 ```bash
-towel history               # list conversations
-towel history --tag work    # filter by tag
-towel log                   # activity timeline
-towel log --today           # today's sessions
-towel search "auth bug"     # search across all conversations
-towel show <id>             # view a conversation
-towel export <id> -f html   # export (markdown/text/json/html)
-towel import backup.json    # import conversations
-towel gc                    # clean up old conversations
+dreamland history               # list conversations
+dreamland history --tag work    # filter by tag
+dreamland log                   # activity timeline
+dreamland log --today           # today's sessions
+dreamland search "auth bug"     # search across all conversations
+dreamland show <id>             # view a conversation
+dreamland export <id> -f html   # export (markdown/text/json/html)
+dreamland import backup.json    # import conversations
+dreamland gc                    # clean up old conversations
 ```
 
 ### In-Chat Commands
@@ -139,11 +139,11 @@ The agent has tools for:
 
 ### Persistent Memory
 
-Towel remembers things across sessions in a local SQLite store with three
+Dreamland remembers things across sessions in a local SQLite store with three
 parallel retrieval tiers fused via Reciprocal Rank Fusion:
 
 - **BM25** (SQLite FTS5) for keyword precision
-- **Vector cosine** via `sentence-transformers` (optional: `pip install "towel-ai[embeddings]"`) for paraphrase recall
+- **Vector cosine** via `sentence-transformers` (optional: `pip install "dreamland[embeddings]"`) for paraphrase recall
 - **Graph co-retrieval** — pairs of memories that show up together get linked, so a hit on one pulls its neighbors
 
 Auto-capture extracts user / preference / project / deadline facts from
@@ -153,25 +153,25 @@ Decay + auto-forget prune stale, never-recalled fact memories;
 user / preference / project entries are protected.
 
 ```bash
-towel memory stats              # counts, recall fraction, by-source/scope, pattern health
-towel memory inspect <key>      # entry detail + salience + related + recent recalls
-towel memory tidy --dry-run     # see what would be pruned
-towel memory tidy --apply       # actually prune
-towel memory consolidate        # find + merge near-duplicates
-towel memory export --out backup.json
-towel memory import backup.json
-towel memory backup             # timestamped snapshot + rotation
-towel memory diff baseline.json # what changed since baseline
-towel memory reembed            # backfill vectors after installing [embeddings]
-towel memory ingest --all       # backfill captures from every saved conversation
-towel memory extract --stdin    # LLM-based extraction for what regex missed
-towel memory recalls --last 24  # query trail: what was asked, what came back
-towel memory activity           # ASCII sparkline of capture rate
-towel memory tag KEY add work   # free-form labels for grouping
-towel memory list --scope all   # cross-project audit
-towel memory forget --tag X     # bulk forget by tag / source / scope
-towel memory nudge KEY          # mark useful — bumps recall_count
-towel memory promote KEY --to global   # move between scopes
+dreamland memory stats              # counts, recall fraction, by-source/scope, pattern health
+dreamland memory inspect <key>      # entry detail + salience + related + recent recalls
+dreamland memory tidy --dry-run     # see what would be pruned
+dreamland memory tidy --apply       # actually prune
+dreamland memory consolidate        # find + merge near-duplicates
+dreamland memory export --out backup.json
+dreamland memory import backup.json
+dreamland memory backup             # timestamped snapshot + rotation
+dreamland memory diff baseline.json # what changed since baseline
+dreamland memory reembed            # backfill vectors after installing [embeddings]
+dreamland memory ingest --all       # backfill captures from every saved conversation
+dreamland memory extract --stdin    # LLM-based extraction for what regex missed
+dreamland memory recalls --last 24  # query trail: what was asked, what came back
+dreamland memory activity           # ASCII sparkline of capture rate
+dreamland memory tag KEY add work   # free-form labels for grouping
+dreamland memory list --scope all   # cross-project audit
+dreamland memory forget --tag X     # bulk forget by tag / source / scope
+dreamland memory nudge KEY          # mark useful — bumps recall_count
+dreamland memory promote KEY --to global   # move between scopes
 ```
 
 **Per-query introspection.** Every `to_prompt_block(query=...)` run is
@@ -187,20 +187,20 @@ so extraction runs when the model is idle.
 
 **Per-project scope.** Memories carry an optional `scope` string —
 empty = global (visible everywhere), non-empty = restricted to
-callers passing the same scope. When `towel chat` / `towel serve` /
-`towel mcp` is launched inside a project (one with `.towel.md`,
+callers passing the same scope. When `dreamland chat` / `dreamland serve` /
+`dreamland mcp` is launched inside a project (one with `.dreamland.md`,
 `.git`, `pyproject.toml`, etc.), they auto-derive a stable scope
 from the project root path. New captures land there by default;
 retrieval ORs current-scope with global so universal facts still
 surface. Use `--scope all` on CLI commands to audit across every
 project from one terminal.
 
-**MCP server.** Run `towel mcp` to expose the store over stdio to any
+**MCP server.** Run `dreamland mcp` to expose the store over stdio to any
 MCP-compatible client (Claude Code, Cursor, OpenCode, Gemini CLI):
 
 ```jsonc
 // .mcp.json
-{"mcpServers": {"towel-memory": {"command": "towel", "args": ["mcp"]}}}
+{"mcpServers": {"dreamland-memory": {"command": "dreamland", "args": ["mcp"]}}}
 ```
 
 Seven tools become available to the client: `memory_search`, `memory_recall`,
@@ -210,7 +210,7 @@ Seven tools become available to the client: `memory_search`, `memory_recall`,
 ### Web UI
 
 ```bash
-towel serve    # starts gateway + web UI
+dreamland serve    # starts gateway + web UI
 # Open http://127.0.0.1:18743
 ```
 
@@ -243,7 +243,7 @@ Give the fleet a goal; it plans, executes, checks, and repairs:
 # across workers, reviewer-checks every result, executes generated
 # Python (run_check), audits the outcome against the goal, and runs
 # one repair round if the audit finds gaps.
-towel orchestrate \
+dreamland orchestrate \
   --goal "Create stats.py with mean/median functions and a demo main block" \
   --workspace /tmp/build --verify --repair --watch
 ```
@@ -269,7 +269,7 @@ towel orchestrate \
 - **Pull the artifacts** — `GET /api/orchestrate/<id>/files` lists the
   project files a run produced; `…/files/<path>` serves raw contents and
   `…/archive` the whole workspace as a zip (traversal-guarded, scoped to
-  the run's recorded workspace). `towel pull <id> [dest]` downloads and
+  the run's recorded workspace). `dreamland pull <id> [dest]` downloads and
   unpacks a build on any machine, and the fleet panel includes a file
   explorer / code viewer with a zip download over the same endpoints.
 - **Push existing code back** — `POST /api/orchestrate` accepts
@@ -283,18 +283,18 @@ towel orchestrate \
   "history" button renders it with a colored diff viewer — a personal
   GitHub-style view of what the fleet changed, run by run. Or just
   `git clone http://coordinator:18743/git/<id>` (read-only smart HTTP),
-  then iterate with `towel orchestrate --project <id> --goal "…"` and
+  then iterate with `dreamland orchestrate --project <id> --goal "…"` and
   `git pull` the fleet's new commit.
 
-Hand-authored plans still work: `towel orchestrate plan.json` or
+Hand-authored plans still work: `dreamland orchestrate plan.json` or
 repeated `--task "role:prompt@deps+tools"` specs.
 
 ### Extensible
 
 ```bash
-towel skill-init my_tool    # generate a skill skeleton
-# Edit ~/.towel/skills/my_tool_skill.py
-# Restart towel — skill auto-loaded
+dreamland skill-init my_tool    # generate a skill skeleton
+# Edit ~/.dreamland/skills/my_tool_skill.py
+# Restart dreamland — skill auto-loaded
 ```
 
 ## Architecture
@@ -322,13 +322,13 @@ towel skill-init my_tool    # generate a skill skeleton
 ## Configuration
 
 ```bash
-towel config        # show current settings
-towel config --json # machine-readable
-towel doctor        # diagnose your setup
-towel bench         # benchmark model speed
+dreamland config        # show current settings
+dreamland config --json # machine-readable
+dreamland doctor        # diagnose your setup
+dreamland bench         # benchmark model speed
 ```
 
-Config lives in `~/.towel/config.toml`. Three built-in agent profiles: **coder**, **researcher**, **writer**.
+Config lives in `~/.dreamland/config.toml`. Three built-in agent profiles: **coder**, **researcher**, **writer**.
 
 **Tuning knobs** (all optional, defaults in parentheses):
 

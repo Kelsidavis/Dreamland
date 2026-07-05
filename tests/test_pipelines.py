@@ -1,6 +1,6 @@
 """Tests for tool pipelines."""
 
-from towel.agent.pipelines import PipelineResult, PipeStep, get_pipeline, list_pipelines
+from dreamland.agent.pipelines import PipelineResult, PipeStep, get_pipeline, list_pipelines
 
 
 class TestPipeStep:

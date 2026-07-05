@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
 
 
 class _FakeAgent:
@@ -20,7 +20,7 @@ class _FakeAgent:
 
 
 def _make_gateway() -> GatewayServer:
-    return GatewayServer(agent=_FakeAgent(), config=TowelConfig())
+    return GatewayServer(agent=_FakeAgent(), config=DreamlandConfig())
 
 
 def _register_busy_worker(gw: GatewayServer, worker_id: str, job_id: str) -> asyncio.Queue:

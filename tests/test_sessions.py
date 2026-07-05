@@ -1,6 +1,6 @@
 """Tests for session management."""
 
-from towel.gateway.sessions import SessionManager
+from dreamland.gateway.sessions import SessionManager
 
 
 def test_get_or_create():

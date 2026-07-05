@@ -1,6 +1,6 @@
 """Tests for the skill marketplace."""
 
-from towel.skills.marketplace import (
+from dreamland.skills.marketplace import (
     COMMUNITY_SKILLS,
     list_installed,
     remove_skill,
@@ -43,7 +43,7 @@ class TestSearch:
 
 class TestInstalled:
     def test_list_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.skills.marketplace.SKILLS_DIR", tmp_path / "empty")
+        monkeypatch.setattr("dreamland.skills.marketplace.SKILLS_DIR", tmp_path / "empty")
         assert list_installed() == []
 
     def test_list_with_skills(self, tmp_path, monkeypatch):
@@ -51,7 +51,7 @@ class TestInstalled:
         d.mkdir()
         (d / "weather_skill.py").write_text("pass")
         (d / "reddit_skill.py").write_text("pass")
-        monkeypatch.setattr("towel.skills.marketplace.SKILLS_DIR", d)
+        monkeypatch.setattr("dreamland.skills.marketplace.SKILLS_DIR", d)
         installed = list_installed()
         assert "weather" in installed
         assert "reddit" in installed
@@ -60,12 +60,12 @@ class TestInstalled:
         d = tmp_path / "skills"
         d.mkdir()
         (d / "weather_skill.py").write_text("pass")
-        monkeypatch.setattr("towel.skills.marketplace.SKILLS_DIR", d)
+        monkeypatch.setattr("dreamland.skills.marketplace.SKILLS_DIR", d)
         result = remove_skill("weather")
         assert "Removed" in result
         assert not (d / "weather_skill.py").exists()
 
     def test_remove_not_installed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.skills.marketplace.SKILLS_DIR", tmp_path)
+        monkeypatch.setattr("dreamland.skills.marketplace.SKILLS_DIR", tmp_path)
         result = remove_skill("nonexistent")
         assert "Not installed" in result

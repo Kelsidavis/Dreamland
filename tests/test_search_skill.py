@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.skills.builtin.search import SearchSkill
+from dreamland.skills.builtin.search import SearchSkill
 
 
 @pytest.fixture

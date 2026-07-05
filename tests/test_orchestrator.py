@@ -2,7 +2,7 @@
 
 import asyncio
 
-from towel.agent.orchestrator import (
+from dreamland.agent.orchestrator import (
     ROLE_PROMPTS,
     AgentTask,
     Orchestrator,
@@ -80,9 +80,9 @@ class TestRolePrompts:
 
 class TestOrchestrator:
     def test_instantiation(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
-        config = TowelConfig()
+        config = DreamlandConfig()
         orch = Orchestrator(config)
         assert orch is not None
 
@@ -136,9 +136,9 @@ class TestOrchestratorWithDispatcher:
     must satisfy (see RoleDispatcher Protocol)."""
 
     def test_dispatcher_invoked_per_task(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="architect", prompt="design API"),
             AgentTask(role="coder", prompt="write impl"),
@@ -160,9 +160,9 @@ class TestOrchestratorWithDispatcher:
         """When a task depends on a prior task, its prompt must
         include the prior task's result — that's how piecemeal
         coordination actually shares state across workers."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="architect", prompt="design"),
             AgentTask(role="coder", prompt="implement", depends_on=[0]),
@@ -178,9 +178,9 @@ class TestOrchestratorWithDispatcher:
         assert "[architect result for:" in second_prompt
 
     def test_dispatcher_run_parallel_independent_sessions(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="file a"),
             AgentTask(role="coder", prompt="file b"),
@@ -201,9 +201,9 @@ class TestOrchestratorWithDispatcher:
         coder/architect/tester subtasks fell through to role_match
         and skipped the dispatcher's prefer_quality preempt path.
         Explicit role→task_type mapping closes the gap."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="architect", prompt="plan it"),
             AgentTask(role="coder", prompt="write it"),
@@ -231,9 +231,9 @@ class TestOrchestratorWithDispatcher:
         the dispatcher — without this, "coder" subtasks can never call
         write_file etc., which makes piecemeal artifact building
         impossible regardless of how good the planning is."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="writer", prompt="explain x"),               # no tools
             AgentTask(role="coder", prompt="write x.py", with_tools=True),
@@ -243,7 +243,7 @@ class TestOrchestratorWithDispatcher:
         assert dispatcher.calls[1]["with_tools"] is True
 
     def test_dispatcher_error_propagates_as_failed_task(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BrokenDispatcher:
             async def dispatch_role_task(self, *args, **kwargs) -> str:  # noqa: ARG002
@@ -252,7 +252,7 @@ class TestOrchestratorWithDispatcher:
         # max_attempts=1 disables the default retry so the test is
         # checking the failure-propagation path, not the retry path.
         orch = Orchestrator(
-            TowelConfig(), dispatcher=_BrokenDispatcher(), max_attempts=1,
+            DreamlandConfig(), dispatcher=_BrokenDispatcher(), max_attempts=1,
         )
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run("g", tasks))
@@ -266,8 +266,8 @@ class TestOrchestratorWithDispatcher:
         marks the task completed and records the attempt count.
         This is the codex-style "primary worker emitted empty text →
         alt worker answered" pattern."""
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         attempts = {"count": 0}
         seen_excludes: list[set[str]] = []
@@ -284,7 +284,7 @@ class TestOrchestratorWithDispatcher:
                     )
                 return "real answer on retry"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_FlakyDispatcher())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_FlakyDispatcher())
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
@@ -297,7 +297,7 @@ class TestOrchestratorWithDispatcher:
         assert seen_excludes[1] == {"primary"}
 
     def test_retry_gives_up_after_max_attempts(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         attempt_log: list[int] = []
 
@@ -307,7 +307,7 @@ class TestOrchestratorWithDispatcher:
                 raise RuntimeError(f"fail #{len(attempt_log)}")
 
         orch = Orchestrator(
-            TowelConfig(), dispatcher=_AlwaysFails(), max_attempts=3,
+            DreamlandConfig(), dispatcher=_AlwaysFails(), max_attempts=3,
         )
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run("g", tasks))
@@ -325,7 +325,7 @@ class TestOrchestratorWithDispatcher:
         (telling them to call write_file primed exactly that garbage —
         live runs produced files of path-handling scaffolding); plain
         text tasks get no workspace text at all."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Caps:
             def __init__(self) -> None:
@@ -341,7 +341,7 @@ class TestOrchestratorWithDispatcher:
                 return "ok"
 
         dispatcher = _Caps()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="write game.py", with_tools=True),
             AgentTask(role="coder", prompt="write lib.py", extract_to="lib.py"),
@@ -365,17 +365,17 @@ class TestOrchestratorWithDispatcher:
         assert "workspace" not in plain_prompt.lower()
 
     def test_workspace_dir_absent_no_preamble(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         asyncio.run(orch.run("g", tasks))
         assert "Shared workspace" not in dispatcher.calls[0]["prompt"]
 
     def test_workspace_dir_parallel_too(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="file a", with_tools=True),
             AgentTask(role="coder", prompt="file b", with_tools=True),
@@ -391,7 +391,7 @@ class TestOrchestratorWithDispatcher:
         should be `skipped` rather than run with the dep's error
         string injected as context — that wastes worker time and
         produces nonsensical output."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _FailFirst:
             def __init__(self) -> None:
@@ -409,7 +409,7 @@ class TestOrchestratorWithDispatcher:
 
         dispatcher = _FailFirst()
         orch = Orchestrator(
-            TowelConfig(), dispatcher=dispatcher, max_attempts=1,
+            DreamlandConfig(), dispatcher=dispatcher, max_attempts=1,
         )
         tasks = [
             AgentTask(role="architect", prompt="plan"),
@@ -431,7 +431,7 @@ class TestOrchestratorWithDispatcher:
         """When any task is skipped, the run is not 'success' and the
         markdown synthesis block stays empty — operators reading the
         response don't get a misleadingly-complete summary."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _FailDep:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -444,7 +444,7 @@ class TestOrchestratorWithDispatcher:
                 return f"{role}-result"
 
         orch = Orchestrator(
-            TowelConfig(), dispatcher=_FailDep(), max_attempts=1,
+            DreamlandConfig(), dispatcher=_FailDep(), max_attempts=1,
         )
         tasks = [
             AgentTask(role="architect", prompt="plan"),
@@ -459,7 +459,7 @@ class TestOrchestratorWithDispatcher:
         through the slow tool loop. Models often wrap code in ```python
         fences; the orchestrator extracts the first block and writes
         it to the workspace path the caller specified."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Echo:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -472,7 +472,7 @@ class TestOrchestratorWithDispatcher:
                     "def hello():\n    return 'hi'\n```\n\nDone."
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Echo())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Echo())
         tasks = [
             AgentTask(role="coder", prompt="write hello", extract_to="hello.py"),
         ]
@@ -493,7 +493,7 @@ class TestOrchestratorWithDispatcher:
         """When the model doesn't use fences, write the whole stripped
         body anyway — a code-shaped response without backticks is
         still useful."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Plain:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -503,7 +503,7 @@ class TestOrchestratorWithDispatcher:
             ):
                 return "def f(): return 1\n"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Plain())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Plain())
         tasks = [
             AgentTask(role="coder", prompt="x", extract_to="f.py"),
         ]
@@ -517,7 +517,7 @@ class TestOrchestratorWithDispatcher:
         orchestrator should treat that as a failed attempt and retry —
         not leave broken code on disk and call the subtask completed.
         Model-quality issues are stochastic; a re-roll often succeeds."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         attempts = {"n": 0}
 
@@ -534,7 +534,7 @@ class TestOrchestratorWithDispatcher:
                     return "```python\ndef broken(\n    return 'oops'\n```"
                 return "```python\ndef ok():\n    return 'fine'\n```"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Flaky(), max_attempts=3)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Flaky(), max_attempts=3)
         tasks = [AgentTask(role="coder", prompt="x", extract_to="hello.py")]
         ws = str(tmp_path / "ws")
         result = asyncio.run(orch.run("g", tasks, workspace_dir=ws))
@@ -551,7 +551,7 @@ class TestOrchestratorWithDispatcher:
         `failed` with the SyntaxError surfaced as the result. The
         partial file from the last attempt remains on disk (operator
         can inspect it) but the orchestrator reports failure."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _AlwaysBroken:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -562,7 +562,7 @@ class TestOrchestratorWithDispatcher:
                 return "```python\ndef broken(\n    return 'oops'\n```"
 
         orch = Orchestrator(
-            TowelConfig(), dispatcher=_AlwaysBroken(), max_attempts=2,
+            DreamlandConfig(), dispatcher=_AlwaysBroken(), max_attempts=2,
         )
         tasks = [AgentTask(role="coder", prompt="x", extract_to="bad.py")]
         ws = str(tmp_path / "ws")
@@ -578,7 +578,7 @@ class TestOrchestratorWithDispatcher:
         observation: a coder subtask returned the literal tool-name
         text, parsed cleanly, wrote 11 bytes to disk. The substance
         check catches that."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         attempts = {"n": 0}
 
@@ -593,7 +593,7 @@ class TestOrchestratorWithDispatcher:
                     return "write_file"  # bare identifier
                 return "```python\ndef ok():\n    return 'fine'\n```"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Flaky(), max_attempts=3)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Flaky(), max_attempts=3)
         tasks = [AgentTask(role="coder", prompt="x", extract_to="m.py")]
         ws = str(tmp_path / "ws")
         result = asyncio.run(orch.run("g", tasks, workspace_dir=ws))
@@ -606,7 +606,7 @@ class TestOrchestratorWithDispatcher:
     def test_extract_to_rejects_path_traversal(self, tmp_path):
         """A model-suggested `extract_to` shouldn't be able to write
         outside the workspace. Path resolution + ancestor check."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Echo:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -616,7 +616,7 @@ class TestOrchestratorWithDispatcher:
             ):
                 return "```python\nx = 1\n```"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Echo())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Echo())
         tasks = [
             AgentTask(role="coder", prompt="x", extract_to="../escape.py"),
         ]
@@ -633,9 +633,9 @@ class TestOrchestratorWithDispatcher:
     def test_retry_max_attempts_floor_is_one(self):
         """max_attempts<=0 should clamp to 1 — orchestrator must always
         try at least once per subtask, never zero-attempts."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=0)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=0)
         tasks = [AgentTask(role="coder", prompt="x")]
         asyncio.run(orch.run("g", tasks))
         assert len(dispatcher.calls) == 1
@@ -647,7 +647,7 @@ class TestRetryFeedback:
     prompt — re-rolling blind wastes the retry on the same mistake."""
 
     def test_syntax_rejection_feeds_back_into_retry_prompt(self, tmp_path):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Flaky:
             def __init__(self) -> None:
@@ -663,7 +663,7 @@ class TestRetryFeedback:
                 return "```python\ndef ok():\n    return 1\n```"
 
         dispatcher = _Flaky()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = [AgentTask(role="coder", prompt="write f.py", extract_to="f.py")]
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -678,8 +678,8 @@ class TestRetryFeedback:
     def test_infra_failure_does_not_add_feedback(self):
         """WorkerDispatchError retries the same prompt verbatim — the
         model never saw the failure, so there is nothing to correct."""
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         class _FlakyInfra:
             def __init__(self) -> None:
@@ -695,7 +695,7 @@ class TestRetryFeedback:
                 return "fine"
 
         dispatcher = _FlakyInfra()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = [AgentTask(role="writer", prompt="write docs")]
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
@@ -708,7 +708,7 @@ class TestVerify:
     task verified."""
 
     def test_fail_then_pass_retries_with_feedback(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Reviewer:
             def __init__(self) -> None:
@@ -728,7 +728,7 @@ class TestVerify:
                 return "def hello(): ..."
 
         dispatcher = _Reviewer()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = [AgentTask(role="coder", prompt="write hello and goodbye", verify=True)]
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
@@ -741,7 +741,7 @@ class TestVerify:
         assert "rejected" in coder_prompts[1]
 
     def test_terminal_fail_marks_task_failed_and_unverified(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _AlwaysFail:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -752,7 +752,7 @@ class TestVerify:
                     return "VERDICT: FAIL — wrong output"
                 return "something off-task"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_AlwaysFail(), max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_AlwaysFail(), max_attempts=2)
         tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
         result = asyncio.run(orch.run("g", tasks))
         assert not result.success
@@ -762,8 +762,8 @@ class TestVerify:
 
     def test_reviewer_unavailable_accepts_unverified(self):
         """A flaky reviewer must not kill otherwise-good work."""
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         class _NoReviewer:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -774,7 +774,7 @@ class TestVerify:
                     raise WorkerDispatchError("no worker available")
                 return "result"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_NoReviewer())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_NoReviewer())
         tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
@@ -782,7 +782,7 @@ class TestVerify:
         assert tasks[0].verified is None
 
     def test_unparseable_verdict_accepts_unverified(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Rambler:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -793,7 +793,7 @@ class TestVerify:
                     return "Well, it looks mostly fine to me I suppose."
                 return "result"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Rambler())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Rambler())
         tasks = [AgentTask(role="coder", prompt="do x", verify=True)]
         result = asyncio.run(orch.run("g", tasks))
         assert result.success
@@ -806,9 +806,9 @@ class TestParallelWaves:
     sequential path."""
 
     def test_dependent_sees_dependency_results(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="architect", prompt="design part A"),
             AgentTask(role="architect", prompt="design part B"),
@@ -824,7 +824,7 @@ class TestParallelWaves:
     def test_independent_tasks_share_a_wave(self):
         """Both roots must be in flight simultaneously — the wave
         gathers them together rather than serializing."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Barrier:
             def __init__(self) -> None:
@@ -842,7 +842,7 @@ class TestParallelWaves:
                 return "ok"
 
         dispatcher = _Barrier()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="a"),
             AgentTask(role="coder", prompt="b"),
@@ -853,8 +853,8 @@ class TestParallelWaves:
         assert dispatcher.max_in_flight == 2
 
     def test_failed_dep_skips_dependent_in_parallel(self):
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         class _FailFirst:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -865,7 +865,7 @@ class TestParallelWaves:
                     raise WorkerDispatchError("boom")
                 return "ok"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_FailFirst(), max_attempts=1)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_FailFirst(), max_attempts=1)
         tasks = [
             AgentTask(role="coder", prompt="part A"),
             AgentTask(role="coder", prompt="part B"),
@@ -880,9 +880,9 @@ class TestParallelWaves:
 
     def test_dependency_cycle_terminates_as_skipped(self):
         """A cycle must terminate with the tasks skipped — not hang."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="a", depends_on=[1]),
             AgentTask(role="coder", prompt="b", depends_on=[0]),
@@ -893,9 +893,9 @@ class TestParallelWaves:
         assert "cycle" in tasks[0].result
 
     def test_parallel_synthesis_on_success(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="a"),
             AgentTask(role="writer", prompt="b"),
@@ -910,7 +910,7 @@ class TestPlan:
     architect-role dispatch, retrying with feedback on a bad plan."""
 
     def test_plan_parses_json_array(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Planner:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -924,14 +924,14 @@ class TestPlan:
                     ' "depends_on": [0]}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Planner())
         tasks = asyncio.run(orch.plan("build a calculator"))
         assert [t.role for t in tasks] == ["coder", "tester"]
         assert tasks[0].extract_to == "calc.py"
         assert tasks[1].depends_on == [0]
 
     def test_plan_tolerates_fenced_json_with_prose(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Chatty:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -944,13 +944,13 @@ class TestPlan:
                     "```\nGood luck!"
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Chatty())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Chatty())
         tasks = asyncio.run(orch.plan("document the project"))
         assert len(tasks) == 1
         assert tasks[0].role == "writer"
 
     def test_plan_retries_with_feedback_on_invalid_plan(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BadThenGood:
             def __init__(self) -> None:
@@ -966,7 +966,7 @@ class TestPlan:
                 return '[{"role": "coder", "prompt": "fixed"}]'
 
         dispatcher = _BadThenGood()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
         assert len(tasks) == 1
         assert tasks[0].role == "coder"
@@ -977,7 +977,7 @@ class TestPlan:
     def test_plan_gives_up_after_max_attempts(self):
         import pytest
 
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _AlwaysBad:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -986,7 +986,7 @@ class TestPlan:
             ) -> str:
                 return "no json here"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_AlwaysBad(), max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_AlwaysBad(), max_attempts=2)
         with pytest.raises(ValueError, match="no valid plan"):
             asyncio.run(orch.plan("g"))
 
@@ -996,7 +996,7 @@ class TestPlan:
         indices and repeat them through every feedback retry (live),
         so rejection deadlocks planning. Prompts are self-contained by
         rule, so a dropped dep costs context, not correctness."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Forward:
             def __init__(self) -> None:
@@ -1013,7 +1013,7 @@ class TestPlan:
                 )
 
         dispatcher = _Forward()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
         assert dispatcher.count == 1
         assert tasks[0].depends_on == []
@@ -1021,7 +1021,7 @@ class TestPlan:
         assert tasks[1].depends_on == [0]
 
     def test_plan_verify_flag_applies_to_all_tasks(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Planner:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1033,7 +1033,7 @@ class TestPlan:
                     ' {"role": "writer", "prompt": "b"}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Planner())
         tasks = asyncio.run(orch.plan("g", verify=True))
         assert all(t.verify for t in tasks)
 
@@ -1044,7 +1044,7 @@ class TestRunCheck:
     real execution instead of a hallucinated 'I ran it and it works'."""
 
     def test_crash_feeds_stderr_back_and_retry_recovers(self, tmp_path):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BadThenGood:
             def __init__(self) -> None:
@@ -1060,7 +1060,7 @@ class TestRunCheck:
                 return "```python\nprint('recovered')\n```"
 
         dispatcher = _BadThenGood()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = [AgentTask(
             role="coder", prompt="write app.py",
             extract_to="app.py", run_check=True,
@@ -1077,7 +1077,7 @@ class TestRunCheck:
         assert tasks[0].run_output == "recovered\n"
 
     def test_timeout_rejects(self, tmp_path):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Sleeper:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1086,7 +1086,7 @@ class TestRunCheck:
             ) -> str:
                 return "```python\nimport time\ntime.sleep(30)\n```"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Sleeper(), max_attempts=1)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Sleeper(), max_attempts=1)
         orch.run_check_timeout = 0.5
         tasks = [AgentTask(
             role="coder", prompt="x", extract_to="slow.py", run_check=True,
@@ -1099,7 +1099,7 @@ class TestRunCheck:
         assert "did not finish" in tasks[0].result
 
     def test_run_output_injected_into_dependent_context(self, tmp_path):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Coder:
             def __init__(self) -> None:
@@ -1115,7 +1115,7 @@ class TestRunCheck:
                 return "confirmed"
 
         dispatcher = _Coder()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="write answer.py",
                       extract_to="answer.py", run_check=True),
@@ -1131,7 +1131,7 @@ class TestRunCheck:
         assert "42" in reviewer_prompt
 
     def test_plan_accepts_run_check(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Planner:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1143,7 +1143,7 @@ class TestRunCheck:
                     ' "extract_to": "x.py", "run_check": true}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Planner())
         tasks = asyncio.run(orch.plan("g"))
         assert tasks[0].run_check is True
 
@@ -1151,7 +1151,7 @@ class TestRunCheck:
         """Planners echo run_check onto no-file tasks despite the
         guidance; that normalizes to False rather than failing the
         plan (rejection was observed to burn all attempts live)."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Echoey:
             def __init__(self) -> None:
@@ -1165,7 +1165,7 @@ class TestRunCheck:
                 return '[{"role": "coder", "prompt": "x", "run_check": true}]'
 
         dispatcher = _Echoey()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
         assert len(tasks) == 1
         assert tasks[0].run_check is False
@@ -1176,7 +1176,7 @@ class TestRunCheck:
         guidance; later duplicates lose extract_to/run_check instead of
         failing the plan (rejection burned every retry live) — the
         first writer wins, dependents read via depends_on."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Dup:
             def __init__(self) -> None:
@@ -1196,7 +1196,7 @@ class TestRunCheck:
                 )
 
         dispatcher = _Dup()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         tasks = asyncio.run(orch.plan("g"))
         assert dispatcher.count == 1
         assert len(tasks) == 2
@@ -1208,7 +1208,7 @@ class TestRunCheck:
     def test_plan_tolerates_empty_extract_to(self):
         """Planners echo the schema with "" for no-file tasks — that
         must normalize to None, not fail the plan."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Planner:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1220,7 +1220,7 @@ class TestRunCheck:
                     ' {"role": "coder", "prompt": "code", "extract_to": "x.py"}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Planner())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Planner())
         tasks = asyncio.run(orch.plan("g"))
         assert tasks[0].extract_to is None
         assert tasks[1].extract_to == "x.py"
@@ -1232,7 +1232,7 @@ class TestGoalCheckAndRepair:
     per-task verify can pass every subtask while the goal is missed."""
 
     def test_goal_check_achieved(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Auditor:
             def __init__(self) -> None:
@@ -1248,7 +1248,7 @@ class TestGoalCheckAndRepair:
                 return "done"
 
         dispatcher = _Auditor()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="do x")]
         result = asyncio.run(orch.run_goal(
             "the goal", tasks, goal_check=True,
@@ -1263,9 +1263,9 @@ class TestGoalCheckAndRepair:
         assert "task 0 (coder)" in audit["prompt"]
 
     def test_goal_check_off_by_default(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal("g", tasks))
         assert result.goal_achieved is None
@@ -1275,7 +1275,7 @@ class TestGoalCheckAndRepair:
     def test_repair_round_fixes_gaps(self, tmp_path):
         """INCOMPLETE audit → planner produces a repair task → it runs
         → second audit passes."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _World:
             def __init__(self) -> None:
@@ -1308,7 +1308,7 @@ class TestGoalCheckAndRepair:
                 return "```python\ndef goodbye():\n    return 'bye'\n```"
 
         dispatcher = _World()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="write app.py")]
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -1328,7 +1328,7 @@ class TestGoalCheckAndRepair:
         assert dispatcher.audits == 2
 
     def test_repair_not_run_when_achieved(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _HappyAuditor:
             def __init__(self) -> None:
@@ -1345,7 +1345,7 @@ class TestGoalCheckAndRepair:
                 return "done"
 
         dispatcher = _HappyAuditor()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal(
             "g", tasks, goal_check=True, repair=True,
@@ -1354,8 +1354,8 @@ class TestGoalCheckAndRepair:
         assert dispatcher.planner_called is False
 
     def test_auditor_unavailable_fails_open(self):
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         class _NoAuditor:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1366,7 +1366,7 @@ class TestGoalCheckAndRepair:
                     raise WorkerDispatchError("no worker")
                 return "done"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_NoAuditor())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_NoAuditor())
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal(
             "g", tasks, goal_check=True, repair=True,
@@ -1377,7 +1377,7 @@ class TestGoalCheckAndRepair:
         assert result.success
 
     def test_repair_planning_failure_keeps_first_audit(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BrokenPlanner:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1390,7 +1390,7 @@ class TestGoalCheckAndRepair:
                     return "utter nonsense"
                 return "done"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_BrokenPlanner(), max_attempts=1)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_BrokenPlanner(), max_attempts=1)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal(
             "g", tasks, goal_check=True, repair=True,
@@ -1403,7 +1403,7 @@ class TestGoalCheckAndRepair:
     def test_repair_tasks_grounded_in_current_file_contents(self, tmp_path):
         """A repair task rewriting a file must receive that file's
         CURRENT contents — depends_on can't bridge runs."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _World:
             def __init__(self) -> None:
@@ -1437,7 +1437,7 @@ class TestGoalCheckAndRepair:
                 )
 
         dispatcher = _World()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="write app.py",
                            extract_to="app.py")]
         ws = tmp_path / "ws"
@@ -1463,7 +1463,7 @@ class TestReadinessScheduling:
         as soon as B completes, while A is still running."""
         import time as _time
 
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Timeline:
             def __init__(self) -> None:
@@ -1489,7 +1489,7 @@ class TestReadinessScheduling:
                 return "C done"
 
         dispatcher = _Timeline()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="slow task A"),
             AgentTask(role="coder", prompt="fast task B"),
@@ -1504,7 +1504,7 @@ class TestReadinessScheduling:
         assert c_started < dispatcher.a_done_at
 
     def test_concurrency_throttled_to_fleet_size(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _OneWorker:
             def __init__(self) -> None:
@@ -1525,7 +1525,7 @@ class TestReadinessScheduling:
                 return "ok"
 
         dispatcher = _OneWorker()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt=f"t{i}") for i in range(4)]
         result = asyncio.run(orch.run_parallel("g", tasks))
         assert result.success
@@ -1533,7 +1533,7 @@ class TestReadinessScheduling:
         assert dispatcher.max_in_flight == 1
 
     def test_fleet_size_saturated_not_exceeded(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _TwoWorkers:
             def __init__(self) -> None:
@@ -1554,7 +1554,7 @@ class TestReadinessScheduling:
                 return "ok"
 
         dispatcher = _TwoWorkers()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt=f"t{i}") for i in range(5)]
         result = asyncio.run(orch.run_parallel("g", tasks))
         assert result.success
@@ -1562,7 +1562,7 @@ class TestReadinessScheduling:
         assert dispatcher.max_in_flight == 2
 
     def test_planner_hint_mentions_concurrency_on_multi_worker_fleet(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BigFleet:
             def __init__(self) -> None:
@@ -1579,12 +1579,12 @@ class TestReadinessScheduling:
                 return '[{"role": "coder", "prompt": "x"}]'
 
         dispatcher = _BigFleet()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         asyncio.run(orch.plan("g"))
         assert "3 tasks CONCURRENTLY" in dispatcher.prompts[0]
 
     def test_planner_hint_absent_on_single_worker(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Solo:
             def __init__(self) -> None:
@@ -1601,7 +1601,7 @@ class TestReadinessScheduling:
                 return '[{"role": "coder", "prompt": "x"}]'
 
         dispatcher = _Solo()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         asyncio.run(orch.plan("g"))
         assert "CONCURRENTLY" not in dispatcher.prompts[0]
 
@@ -1611,7 +1611,7 @@ class TestDiskTruthDepContext:
         """When a dependency wrote a file, the dependent's context
         carries the file's CURRENT on-disk contents, not the raw chat
         response (prose + possibly stale drafts)."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Coder:
             def __init__(self) -> None:
@@ -1630,7 +1630,7 @@ class TestDiskTruthDepContext:
                 return "reviewed"
 
         dispatcher = _Coder()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="coder", prompt="write mod.py", extract_to="mod.py"),
             AgentTask(role="reviewer", prompt="review mod.py", depends_on=[0]),
@@ -1647,9 +1647,9 @@ class TestDiskTruthDepContext:
         assert "DRAFT_MARKER" not in reviewer_prompt
 
     def test_dep_without_file_still_passes_result(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
         dispatcher = _RecordingDispatcher()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [
             AgentTask(role="researcher", prompt="find facts"),
             AgentTask(role="writer", prompt="write it up", depends_on=[0]),
@@ -1665,7 +1665,7 @@ class TestAuditPanel:
     final word (single-auditor false-negatives observed live 3x)."""
 
     def test_majority_outvotes_false_negative(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Panel:
             def __init__(self) -> None:
@@ -1686,7 +1686,7 @@ class TestAuditPanel:
                 return "done"
 
         dispatcher = _Panel()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         assert dispatcher.reviews == 3
@@ -1694,8 +1694,8 @@ class TestAuditPanel:
         assert result.goal_achieved is True
 
     def test_tie_counts_as_incomplete_with_merged_gaps(self):
-        from towel.agent.orchestrator import WorkerDispatchError
-        from towel.config import TowelConfig
+        from dreamland.agent.orchestrator import WorkerDispatchError
+        from dreamland.config import DreamlandConfig
 
         class _Split:
             def __init__(self) -> None:
@@ -1719,7 +1719,7 @@ class TestAuditPanel:
                 return "done"
 
         dispatcher = _Split()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         # Tie → follow-through bias: INCOMPLETE, gaps preserved.
@@ -1727,7 +1727,7 @@ class TestAuditPanel:
         assert "missing avg key" in result.goal_feedback
 
     def test_single_worker_fleet_audits_once(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Solo:
             def __init__(self) -> None:
@@ -1746,7 +1746,7 @@ class TestAuditPanel:
                 return "done"
 
         dispatcher = _Solo()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         assert dispatcher.reviews == 1
@@ -1758,7 +1758,7 @@ class TestMultiFilePlans:
         """A plan writing Python but executing none of it leaves the
         goal audit with zero ground truth — the last .py task gets
         run_check enabled (entry point by dependency order)."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _NoChecks:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1771,13 +1771,13 @@ class TestMultiFilePlans:
                     ' "extract_to": "main.py", "depends_on": [0]}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_NoChecks())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_NoChecks())
         tasks = asyncio.run(orch.plan("g"))
         assert tasks[0].run_check is False
         assert tasks[1].run_check is True
 
     def test_plan_respects_existing_run_check(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _HasCheck:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1790,7 +1790,7 @@ class TestMultiFilePlans:
                     ' {"role": "coder", "prompt": "b", "extract_to": "b.py"}]'
                 )
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_HasCheck())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_HasCheck())
         tasks = asyncio.run(orch.plan("g"))
         assert tasks[0].run_check is True
         # No forced check on the last task — one exists already.
@@ -1802,7 +1802,7 @@ class TestRefreshRunOutputs:
         """A sibling rewrite after a file's run_check must show up in
         the evidence the audit sees — the pre-audit re-run replaces the
         stale snapshot."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Auditor:
             def __init__(self) -> None:
@@ -1821,7 +1821,7 @@ class TestRefreshRunOutputs:
                 return "```python\nimport lib\nprint(lib.VALUE)\n```"
 
         dispatcher = _Auditor()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / "lib.py").write_text("VALUE = 'ORIGINAL'\n")
@@ -1839,7 +1839,7 @@ class TestRefreshRunOutputs:
         assert "UPDATED" in tasks[0].run_output
 
     def test_failed_rerun_recorded_as_evidence(self, tmp_path):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Coder:
             async def dispatch_role_task(  # noqa: PLR0913
@@ -1848,7 +1848,7 @@ class TestRefreshRunOutputs:
             ) -> str:
                 return "```python\nimport lib\nprint(lib.VALUE)\n```"
 
-        orch = Orchestrator(TowelConfig(), dispatcher=_Coder())
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_Coder())
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / "lib.py").write_text("VALUE = 1\n")
@@ -1869,7 +1869,7 @@ class TestSiblingImportRace:
         """Entry point executed before its library exists must wait for
         the sibling task and re-run — not burn retries regenerating a
         file that was never the problem."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _TwoWorkers:
             def __init__(self) -> None:
@@ -1891,7 +1891,7 @@ class TestSiblingImportRace:
                 return "```python\nimport lib\nprint(lib.VALUE)\n```"
 
         dispatcher = _TwoWorkers()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=2)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=2)
         import tempfile
         with tempfile.TemporaryDirectory() as ws:
             tasks = [
@@ -1911,7 +1911,7 @@ class TestSiblingImportRace:
         """`cannot import name X from sibling` can't be fixed by
         regenerating THIS file — one attempt, immediate failure, blame
         assigned to the sibling in the result for the repair planner."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _Coder:
             def __init__(self) -> None:
@@ -1931,7 +1931,7 @@ class TestSiblingImportRace:
                 )
 
         dispatcher = _Coder()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher, max_attempts=3)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher, max_attempts=3)
         ws = tmp_path / "ws"
         ws.mkdir()
         tasks = [
@@ -1953,7 +1953,7 @@ class TestLocalJudgePanel:
     def test_panel_shrinks_to_one_local_judge(self):
         """When the dispatcher reports judgment lands on the local big
         model, one vote suffices — no serialized triple generation."""
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _BigCoordinator:
             def __init__(self) -> None:
@@ -1975,14 +1975,14 @@ class TestLocalJudgePanel:
                 return "done"
 
         dispatcher = _BigCoordinator()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         result = asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         assert result.goal_achieved is True
         assert dispatcher.audits == 1
 
     def test_panel_votes_when_judgment_stays_on_fleet(self):
-        from towel.config import TowelConfig
+        from dreamland.config import DreamlandConfig
 
         class _SmallFleet:
             def __init__(self) -> None:
@@ -2004,7 +2004,7 @@ class TestLocalJudgePanel:
                 return "done"
 
         dispatcher = _SmallFleet()
-        orch = Orchestrator(TowelConfig(), dispatcher=dispatcher)
+        orch = Orchestrator(DreamlandConfig(), dispatcher=dispatcher)
         tasks = [AgentTask(role="coder", prompt="x")]
         asyncio.run(orch.run_goal("g", tasks, goal_check=True))
         assert dispatcher.audits == 3

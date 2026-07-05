@@ -13,10 +13,10 @@ import asyncio
 
 import pytest
 
-from towel.agent.capture import run_capture_hooks
-from towel.config import TowelConfig
-from towel.memory.llm_extract import _inflight
-from towel.memory.store import MemoryStore
+from dreamland.agent.capture import run_capture_hooks
+from dreamland.config import DreamlandConfig
+from dreamland.memory.llm_extract import _inflight
+from dreamland.memory.store import MemoryStore
 
 
 class _StubRuntime:
@@ -54,7 +54,7 @@ class TestRegexPath:
     def test_regex_match_captures_and_skips_llm(self, store):
         # "I'm a backend engineer" hits the role regex, so the LLM
         # extract path must NOT fire even when auto_llm_extract is on.
-        config = TowelConfig(auto_capture=True, auto_llm_extract=True)
+        config = DreamlandConfig(auto_capture=True, auto_llm_extract=True)
         runtime = _StubRuntime(response="[]")
 
         async def main() -> None:
@@ -77,7 +77,7 @@ class TestLLMExtractPath:
         # Pick text the regex set won't match: no first-person cues,
         # no explicit remember, no preference phrasing. The LLM
         # extract path should kick in.
-        config = TowelConfig(auto_capture=True, auto_llm_extract=True)
+        config = DreamlandConfig(auto_capture=True, auto_llm_extract=True)
         canned = '[{"key": "stack", "content": "rust + tokio", "type": "fact"}]'
         runtime = _StubRuntime(response=canned)
 
@@ -98,7 +98,7 @@ class TestLLMExtractPath:
         assert e.content == "rust + tokio"
 
     def test_regex_miss_without_flag_does_nothing(self, store):
-        config = TowelConfig(auto_capture=True, auto_llm_extract=False)
+        config = DreamlandConfig(auto_capture=True, auto_llm_extract=False)
         runtime = _StubRuntime(response='[{"key": "x", "content": "y", "type": "fact"}]')
 
         async def main() -> None:
@@ -115,7 +115,7 @@ class TestLLMExtractPath:
 
 class TestGracefulFailure:
     def test_no_memory_is_noop(self):
-        config = TowelConfig(auto_capture=True, auto_llm_extract=True)
+        config = DreamlandConfig(auto_capture=True, auto_llm_extract=True)
         runtime = _StubRuntime(response="[]")
         # memory=None mustn't crash.
         run_capture_hooks(
@@ -124,7 +124,7 @@ class TestGracefulFailure:
         assert runtime.step_calls == []
 
     def test_empty_query_is_noop(self, store):
-        config = TowelConfig(auto_capture=True, auto_llm_extract=True)
+        config = DreamlandConfig(auto_capture=True, auto_llm_extract=True)
         runtime = _StubRuntime(response="[]")
         run_capture_hooks(
             "", memory=store, config=config, runtime=runtime,
@@ -140,15 +140,15 @@ class TestRuntimeWiringRemainsConnected:
         # Patch run_capture_hooks to a sentinel and verify AgentRuntime
         # routes through it. We don't run inference — we just call the
         # extracted method directly.
-        from towel.agent.runtime import AgentRuntime
+        from dreamland.agent.runtime import AgentRuntime
 
         seen: list[str] = []
 
         def fake_hooks(query, *, memory, config, runtime):
             seen.append(query)
 
-        monkeypatch.setattr("towel.agent.capture.run_capture_hooks", fake_hooks)
-        config = TowelConfig(identity="x")
+        monkeypatch.setattr("dreamland.agent.capture.run_capture_hooks", fake_hooks)
+        config = DreamlandConfig(identity="x")
         rt = AgentRuntime(config, memory=store)
         rt._run_capture_hooks("hello world")
         assert seen == ["hello world"]

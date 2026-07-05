@@ -6,13 +6,32 @@ a glance whether a release affects you.
 
 ## Unreleased
 
+### Renamed: Towel → Dreamland (2026-07-05)
+
+The project is now **Dreamland** (Area 51's radio callsign — the
+classified desert site where specialist crews quietly build things
+that officially don't exist). Continuity is preserved everywhere:
+
+- package `dreamland` (PyPI name `dreamland`), CLI `dreamland` with a
+  `towel` alias kept so old muscle memory and scripts work.
+- data dir resolves by config presence: `$DREAMLAND_HOME`, legacy
+  `$TOWEL_HOME`, `~/.dreamland/config.toml`, then legacy
+  `~/.towel/config.toml` — existing installs keep config,
+  conversations, memory, workspaces, and orchestration history with
+  zero migration.
+- legacy import shim: `from towel.… import …` still resolves (user
+  skills keep loading).
+- fixed on the way: the audit log hardcoded its home instead of
+  following the resolved data dir, letting test runs create a stray
+  `~/.dreamland` that could hijack home resolution.
+
 ### Orchestrator: goal-driven multi-worker builds (2026-07-03)
 
 The orchestrator went from "execute a hand-written task list" to a
 full goal → plan → execute → check → repair pipeline, verified live
 on a two-worker MLX fleet:
 
-- **Auto-planning**: `towel orchestrate --goal "…"` with no tasks —
+- **Auto-planning**: `dreamland orchestrate --goal "…"` with no tasks —
   a planner-role worker emits the task DAG; malformed plans retry
   with the validation error fed back; planner quirks that feedback
   can't fix (schema echo, duplicate file writers, stale task indices
@@ -37,16 +56,16 @@ on a two-worker MLX fleet:
   a running orchestration automatically (work started on another
   machine or before a reload resumes showing live progress instead of
   a blank panel); the recent-runs picker loads any run's full status;
-  `towel orchestrate --attach <id>` does the same from the CLI.
+  `dreamland orchestrate --attach <id>` does the same from the CLI.
 - **Chat transcripts restore too**: fixed a localStorage guard that
   skipped transcript restore on every page reload after the first
   (users saw a welcome screen over their existing conversation), and
   a fresh browser now adopts the most recent server conversation
   instead of opening a blank session — chat carries across machines.
 - **Persistent history**: every run (sync and background) is recorded
-  to `~/.towel/orchestrations.json` (newest 100 kept); records survive
+  to `~/.dreamland/orchestrations.json` (newest 100 kept); records survive
   coordinator restarts, in-flight runs get marked `interrupted`.
-  `GET /api/orchestrations` and `towel orchestrations` list recent
+  `GET /api/orchestrations` and `dreamland orchestrations` list recent
   runs; `GET /api/orchestrate/<id>` serves finished runs from history.
 - **Local planner + auditor**: when the coordinator's own model is ≥2×
   the best connected worker (or the fleet is empty), orchestration
@@ -60,7 +79,7 @@ on a two-worker MLX fleet:
   correct ACHIEVED verdict, 12s, zero repairs.
   `local_planner_enabled = false` opts out.
 - **Managed workspaces**: omitting `workspace_dir` now provisions
-  `~/.towel/workspaces/<id>` automatically — previously extract_to
+  `~/.dreamland/workspaces/<id>` automatically — previously extract_to
   files were silently never written, so a bare goal produced a
   "completed" run with nothing pullable.
 - **Capability-matched workspace directive**: chat-fast extract_to
@@ -80,7 +99,7 @@ on a two-worker MLX fleet:
   with a real `git clone` end-to-end (pinned by a uvicorn-backed test).
 - **Git-backed project history**: managed workspaces are git repos —
   seed files commit as "Seed files: <goal>", each finished run commits
-  as "achieved/completed/partial: <goal> [towel:<id>]", so the project
+  as "achieved/completed/partial: <goal> [dreamland:<id>]", so the project
   timeline is a real git log and each run's changes are a real diff.
   `GET /api/orchestrate/<id>/git/log` and `…/git/diff/<sha>` serve
   them; the web explorer gains a "history" button with a colored diff
@@ -101,7 +120,7 @@ on a two-worker MLX fleet:
 - **One-command project pulls**: `GET /api/orchestrate/<id>/archive`
   serves the whole workspace as a zip (same filters as the listing,
   200MB cap); the web explorer gains a "↓ zip" download button; new
-  `towel pull <id> [dest]` downloads and unpacks a build on any
+  `dreamland pull <id> [dest]` downloads and unpacks a build on any
   machine (zip-slip guarded). `--json` CLI outputs now print plain
   (Rich's wrapping corrupted them for scripts).
 - **File explorer / artifact pulling**: `GET /api/orchestrate/<id>/files`
@@ -165,16 +184,16 @@ and onboarding. ~52 commits.
 
 ### Remote lifecycle management
 
-- **`towel launcher`** daemon — HTTP server you run on each candidate
+- **`dreamland launcher`** daemon — HTTP server you run on each candidate
   worker host. Coordinator can POST `/launch` (auth via
-  `$TOWEL_TRIGGER_TOKEN`) to spawn a fresh `towel worker` process.
+  `$DREAMLAND_TRIGGER_TOKEN`) to spawn a fresh `dreamland worker` process.
 - **`/fleet/spawn`**, **`/fleet/replace-worker`**, **`/fleet/upgrade`**,
   **`/fleet/rolling-replace`** — coordinator-side orchestration on top
   of the launcher: spawn, drain+respawn, run `pip install --upgrade
-  towel`, walk N workers serially with a configurable delay.
+  dreamland`, walk N workers serially with a configurable delay.
 - **Worker shutdown WS message** so replace flows exit cleanly instead
   of relying on launchers to kill the process.
-- **`towel worker --model <name>`** flag — overrides `config.model.name`
+- **`dreamland worker --model <name>`** flag — overrides `config.model.name`
   at startup, the primary knob the coordinator uses to distribute
   different models to different workers.
 
@@ -189,14 +208,14 @@ and onboarding. ~52 commits.
 
 ### Setup + onboarding
 
-- **`towel setup`** — browser GUI to pick backend + model. Reads
+- **`dreamland setup`** — browser GUI to pick backend + model. Reads
   available backends, lists locally-cached models, writes
-  `~/.towel/config.toml`.
-- **First-run hint** in `towel chat` when no config exists.
+  `~/.dreamland/config.toml`.
+- **First-run hint** in `dreamland chat` when no config exists.
 - **`launch.sh` / `launch.command`** now drop the user into setup if
   config is missing.
-- Consistent messaging across README quickstart, `towel init`
-  next-steps, `towel doctor` suggestions.
+- Consistent messaging across README quickstart, `dreamland init`
+  next-steps, `dreamland doctor` suggestions.
 
 ### Chat UX
 
@@ -224,28 +243,28 @@ and onboarding. ~52 commits.
 - **Makefile** with `test`, `lint`, `fmt`, `fix`, `doctor`, `clean`.
 - **pytest-timeout** with 60s per-test ceiling so future infinite
   loops surface as clean failures.
-- Lint baseline cleared across `src/towel/` and `tests/`.
+- Lint baseline cleared across `src/dreamland/` and `tests/`.
 
 ### Daemon logging + error visibility (later in the day)
 
-- Every long-running Towel process — `towel serve`, `towel worker`,
-  `towel setup`, `towel launcher` — now configures
+- Every long-running Dreamland process — `dreamland serve`, `dreamland worker`,
+  `dreamland setup`, `dreamland launcher` — now configures
   `logging.basicConfig(level=INFO, …)` so operators see timestamped
   operational events in the daemon's terminal. Worker registrations,
   dispatch decisions, idle-result sweeps, upgrade requests, and
   shutdown notifications no longer vanish into the void.
-- Logging setup deduplicated into `towel.logging_setup` with an
+- Logging setup deduplicated into `dreamland.logging_setup` with an
   idempotency test.
 - `_load_model_with_friendly_error` helper: every user-facing CLI
   command (chat, ask, commit, summarize, etc.) now degrades to a red
-  Rich Panel pointing at `towel setup` / `towel doctor` when model
+  Rich Panel pointing at `dreamland setup` / `dreamland doctor` when model
   load fails, instead of dumping a stack trace.
 
 ### Stats
 
 - 1214 tests passing in ~28 seconds.
-- Zero lint complaints (`ruff check src/towel/ tests/`).
+- Zero lint complaints (`ruff check src/dreamland/ tests/`).
 - ~400 new tests today, mostly covering the new endpoints, dispatcher
   paths, and the load-failure / logging helpers.
 
-— Towel: Tool Oriented Worker Execution Link. Don't Panic.
+— Dreamland: Tool Oriented Worker Execution Link. Don't Panic.

@@ -6,9 +6,9 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from towel.agent.discovery import GGUFModel
-from towel.agent.llama_runtime import LlamaRuntime
-from towel.config import TowelConfig
+from dreamland.agent.discovery import GGUFModel
+from dreamland.agent.llama_runtime import LlamaRuntime
+from dreamland.config import DreamlandConfig
 
 
 def test_auto_start_disables_llama_fit(monkeypatch):
@@ -37,15 +37,15 @@ def test_auto_start_disables_llama_fit(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "towel.agent.discovery.ManagedLlamaServer",
+        "dreamland.agent.discovery.ManagedLlamaServer",
         FakeManagedLlamaServer,
     )
     monkeypatch.setattr(
-        "towel.agent.discovery.detect_system",
+        "dreamland.agent.discovery.detect_system",
         fake_detect_system,
     )
 
-    runtime = LlamaRuntime(TowelConfig(), llama_url="http://localhost:18081")
+    runtime = LlamaRuntime(DreamlandConfig(), llama_url="http://localhost:18081")
     monkeypatch.setattr(runtime, "_check_health", lambda: asyncio.sleep(0, result=False))
 
     asyncio.run(runtime.load_model())
@@ -61,16 +61,16 @@ def _runtime_with_tools():
     Exercises the tools-attached vs tools-omitted branches of
     build_inference_request against a realistic tool set.
     """
-    from towel.skills.builtin import register_builtins
-    from towel.skills.registry import SkillRegistry
+    from dreamland.skills.builtin import register_builtins
+    from dreamland.skills.registry import SkillRegistry
 
     reg = SkillRegistry()
     register_builtins(reg)
-    return LlamaRuntime(TowelConfig(), skills=reg, llama_url="http://localhost:8080")
+    return LlamaRuntime(DreamlandConfig(), skills=reg, llama_url="http://localhost:8080")
 
 
 def _request_for(rt, text):
-    from towel.agent.conversation import Conversation, Role
+    from dreamland.agent.conversation import Conversation, Role
 
     conv = Conversation(id="t")
     conv.add(Role.USER, text)
@@ -87,7 +87,7 @@ def test_build_request_chat_omits_tools_and_thinking():
 
 def test_build_request_explain_omits_tools_keeps_fast():
     rt = _runtime_with_tools()
-    req = _request_for(rt, "Explain what a towel is for, one sentence.")
+    req = _request_for(rt, "Explain what a dreamland is for, one sentence.")
     assert "tools" not in req
     assert req.get("reasoning_effort") == "none"
 

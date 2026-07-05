@@ -1,6 +1,6 @@
 """Tests for graceful context handoff between workers."""
 
-from towel.gateway.handoff import HandoffManager, HandoffReason, HandoffRecord
+from dreamland.gateway.handoff import HandoffManager, HandoffReason, HandoffRecord
 
 
 class TestHandoffManager:

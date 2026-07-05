@@ -1,6 +1,6 @@
 """Tests for content guardrails."""
 
-from towel.agent.guardrails import check_input, check_output, redact_sensitive
+from dreamland.agent.guardrails import check_input, check_output, redact_sensitive
 
 
 class TestInputGuardrails:

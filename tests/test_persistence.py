@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from towel.agent.conversation import Conversation, Message, Role
-from towel.persistence.store import ConversationStore
+from dreamland.agent.conversation import Conversation, Message, Role
+from dreamland.persistence.store import ConversationStore
 
 
 @pytest.fixture
@@ -243,7 +243,7 @@ class TestImportExportRoundtrip:
     """Test that export → import produces identical conversations."""
 
     def test_json_export_import(self, store, tmp_path):
-        from towel.persistence.export import export_json
+        from dreamland.persistence.export import export_json
 
         conv = _make_conversation("roundtrip-1")
         conv.tags = ["test", "roundtrip"]
@@ -293,7 +293,7 @@ class TestImportExportRoundtrip:
 
 
 class TestLogTimeline:
-    """Test the data that powers towel log."""
+    """Test the data that powers dreamland log."""
 
     def test_conversations_sorted_by_recent_activity(self, store):
 
@@ -398,7 +398,7 @@ class TestGarbageCollection:
 
 class TestSessionManagerPersistence:
     def test_save_and_resume(self, store):
-        from towel.gateway.sessions import SessionManager
+        from dreamland.gateway.sessions import SessionManager
 
         sm = SessionManager(store=store)
         session = sm.get_or_create("persistent-1")
@@ -413,7 +413,7 @@ class TestSessionManagerPersistence:
         assert session2.conversation.messages[0].content == "hello"
 
     def test_save_all(self, store):
-        from towel.gateway.sessions import SessionManager
+        from dreamland.gateway.sessions import SessionManager
 
         sm = SessionManager(store=store)
         sm.get_or_create("a").conversation.add(Role.USER, "msg a")

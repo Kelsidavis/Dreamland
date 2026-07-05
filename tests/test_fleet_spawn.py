@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class _FakeAgent:
@@ -31,7 +31,7 @@ def gateway(store):
     sessions = SessionManager(store=store)
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
-    config = TowelConfig()
+    config = DreamlandConfig()
     return GatewayServer(
         config=config,
         agent=_FakeAgent(),
@@ -56,7 +56,7 @@ class TestFleetSpawn:
     def test_happy_path_forwards_and_returns_launcher_response(self, gateway):
         client = TestClient(gateway._build_http_app())
         post = _mock_post(
-            payload={"ok": True, "pid": 4321, "argv": ["towel", "worker", "..."]}
+            payload={"ok": True, "pid": 4321, "argv": ["dreamland", "worker", "..."]}
         )
         with patch("httpx.AsyncClient.post", post):
             resp = client.post(
@@ -182,7 +182,7 @@ class TestFleetUpgrade:
         client = TestClient(gateway._build_http_app())
         post = _mock_post(
             payload={"ok": True, "strategy": "pip", "returncode": 0,
-                     "stdout": "Successfully installed towel-0.42.0", "stderr": ""}
+                     "stdout": "Successfully installed dreamland-0.42.0", "stderr": ""}
         )
         with patch("httpx.AsyncClient.post", post):
             resp = client.post(

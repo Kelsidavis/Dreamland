@@ -1,9 +1,9 @@
-"""Tests for the singleton Towel runtime lock."""
+"""Tests for the singleton Dreamland runtime lock."""
 
 
 import pytest
 
-from towel.agent import instance_lock
+from dreamland.agent import instance_lock
 
 
 class TestInstanceLock:

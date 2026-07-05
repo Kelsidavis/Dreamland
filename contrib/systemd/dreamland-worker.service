@@ -1,0 +1,22 @@
+[Unit]
+Description=Dreamland AI Worker — auto-discovers GPU, models, and controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/dreamland worker
+Restart=always
+RestartSec=10
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# GPU access
+SupplementaryGroups=video render
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dreamland-worker
+
+[Install]
+WantedBy=default.target

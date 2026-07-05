@@ -1,6 +1,6 @@
 """Tests for agent evaluation."""
 
-from towel.agent.eval import BUILTIN_EVALS, EvalCase, EvalResult, score_case
+from dreamland.agent.eval import BUILTIN_EVALS, EvalCase, EvalResult, score_case
 
 
 class TestEvalCase:

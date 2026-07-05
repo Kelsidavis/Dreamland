@@ -1,20 +1,20 @@
 """Tests for generation cancellation."""
 
-from towel.agent.events import AgentEvent, EventType
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
+from dreamland.agent.events import AgentEvent, EventType
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
 
 
 class TestCancelFlag:
     def test_cancel_sets_flag(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         assert not agent.is_cancelled
         agent.cancel()
         assert agent.is_cancelled
 
     def test_cancel_flag_resets(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         agent.cancel()
         assert agent.is_cancelled
@@ -43,26 +43,34 @@ class TestWebUICancel:
     def test_stop_button_exists(self):
         from pathlib import Path
 
-        html = (Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html").read_text()
+        html = (
+            Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
+        ).read_text()
         assert "stop-btn" in html
         assert "stopGeneration" in html
 
     def test_escape_key_handler(self):
         from pathlib import Path
 
-        html = (Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html").read_text()
+        html = (
+            Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
+        ).read_text()
         assert "Escape" in html
 
     def test_cancel_message_sent(self):
         from pathlib import Path
 
-        html = (Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html").read_text()
+        html = (
+            Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
+        ).read_text()
         assert "'cancel'" in html
 
     def test_cancelled_event_handled(self):
         from pathlib import Path
 
-        html = (Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html").read_text()
+        html = (
+            Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
+        ).read_text()
         assert "'cancelled'" in html
         assert "generation stopped" in html
 
@@ -73,15 +81,15 @@ class TestGatewayCancel:
     def test_gateway_has_cancel_handler(self):
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         source = inspect.getsource(GatewayServer._handle_ws)
         assert "cancel" in source
 
     def test_gateway_tracks_active_tasks(self):
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent)
         assert hasattr(gw, "_active_tasks")
@@ -96,7 +104,7 @@ class TestGatewayCancel:
         session ids and only cancels those."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Per-connection set is built up as streaming starts.
@@ -114,7 +122,7 @@ class TestGatewayCancel:
         running."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Malformed JSON is logged-and-skipped, not raised.
@@ -130,7 +138,7 @@ class TestGatewayCancel:
         the loop either — same reconnect-storm avoidance."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Register coerces non-dict capabilities to {}.
@@ -149,7 +157,7 @@ class TestGatewayCancel:
         fallback (and cap length to keep /workers JSON sane)."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # The coercion lives in the register branch — verify it
@@ -163,7 +171,7 @@ class TestGatewayCancel:
         streaming, mutually exclusive with ensemble)."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Opt-in field is read from the WS frame.
@@ -180,7 +188,7 @@ class TestGatewayCancel:
         guards the wiring."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Opt-in field is read from the WS message frame.
@@ -200,7 +208,7 @@ class TestGatewayCancel:
         so the read loop survives."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # In the "message" branch, session_id, content, channel must

@@ -4,12 +4,12 @@ import textwrap
 
 import pytest
 
-from towel.skills.loader import SkillLoader
-from towel.skills.registry import SkillRegistry
+from dreamland.skills.loader import SkillLoader
+from dreamland.skills.registry import SkillRegistry
 
 SINGLE_FILE_SKILL = textwrap.dedent("""\
     from typing import Any
-    from towel.skills.base import Skill, ToolDefinition
+    from dreamland.skills.base import Skill, ToolDefinition
 
     class GreeterSkill(Skill):
         @property
@@ -31,7 +31,7 @@ SINGLE_FILE_SKILL = textwrap.dedent("""\
 
 PACKAGE_INIT_SKILL = textwrap.dedent("""\
     from typing import Any
-    from towel.skills.base import Skill, ToolDefinition
+    from dreamland.skills.base import Skill, ToolDefinition
 
     class MathSkill(Skill):
         @property
@@ -127,5 +127,5 @@ class TestSkillLoader:
         reg = SkillRegistry()
         loader = SkillLoader(reg)
         loader.load_from_dirs([str(tmp_path)])
-        result = await reg.execute_tool("greet", {"name": "Towel"})
-        assert result == "Hello, Towel!"
+        result = await reg.execute_tool("greet", {"name": "Dreamland"})
+        assert result == "Hello, Dreamland!"

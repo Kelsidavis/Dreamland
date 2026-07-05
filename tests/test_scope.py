@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from towel.memory.scope import derive_scope, find_project_root
-from towel.memory.store import MemoryStore
+from dreamland.memory.scope import derive_scope, find_project_root
+from dreamland.memory.store import MemoryStore
 
 
 class TestFindProjectRoot:
-    def test_finds_towel_md_marker(self, tmp_path):
+    def test_finds_dreamland_md_marker(self, tmp_path):
         root = tmp_path / "proj"
         (root / "src").mkdir(parents=True)
-        (root / ".towel.md").write_text("hi", encoding="utf-8")
+        (root / ".dreamland.md").write_text("hi", encoding="utf-8")
         assert find_project_root(root / "src") == root
 
     def test_walks_up_for_git(self, tmp_path):
@@ -35,7 +35,7 @@ class TestDeriveScope:
     def test_stable_for_same_path(self, tmp_path):
         root = tmp_path / "proj"
         root.mkdir()
-        (root / ".towel.md").write_text("x", encoding="utf-8")
+        (root / ".dreamland.md").write_text("x", encoding="utf-8")
         a = derive_scope(root)
         b = derive_scope(root)
         assert a == b
@@ -46,8 +46,8 @@ class TestDeriveScope:
         root2 = tmp_path / "b"
         root1.mkdir()
         root2.mkdir()
-        (root1 / ".towel.md").write_text("", encoding="utf-8")
-        (root2 / ".towel.md").write_text("", encoding="utf-8")
+        (root1 / ".dreamland.md").write_text("", encoding="utf-8")
+        (root2 / ".dreamland.md").write_text("", encoding="utf-8")
         assert derive_scope(root1) != derive_scope(root2)
 
     def test_empty_when_no_marker(self, tmp_path):
@@ -60,7 +60,7 @@ class TestDeriveScope:
     def test_basename_slug_is_lowercase(self, tmp_path):
         root = tmp_path / "MyCool-Project"
         root.mkdir()
-        (root / ".towel.md").write_text("", encoding="utf-8")
+        (root / ".dreamland.md").write_text("", encoding="utf-8")
         scope = derive_scope(root)
         # Format: proj:<slug>:<sha8>
         slug = scope.split(":")[1]

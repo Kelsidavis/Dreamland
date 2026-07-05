@@ -1,6 +1,6 @@
 # TurboQuant NEON — KV cache compression for ARM
 
-Port of Towel's TurboQuant to ARM NEON (AArch64) for Raspberry Pi 5 and
+Port of Dreamland's TurboQuant to ARM NEON (AArch64) for Raspberry Pi 5 and
 other Cortex-A76+ targets.
 
 ## Algorithm

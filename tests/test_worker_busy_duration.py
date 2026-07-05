@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
-from towel.gateway.workers import WorkerRegistry
+from dreamland.gateway.workers import WorkerRegistry
 
 
 class TestBusySinceTracking:

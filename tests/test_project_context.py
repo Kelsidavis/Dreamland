@@ -1,6 +1,6 @@
-"""Tests for .towel.md project context loading."""
+"""Tests for .dreamland.md project context loading."""
 
-from towel.agent.project import (
+from dreamland.agent.project import (
     CONTEXT_FILENAME,
     MAX_CONTEXT_BYTES,
     find_project_contexts,
@@ -39,20 +39,20 @@ class TestFindProjectContexts:
         assert "Child" in paths[0].read_text()
         assert "Root" in paths[1].read_text()
 
-    def test_finds_dot_towel_directory(self, tmp_path):
-        towel_dir = tmp_path / ".towel"
-        towel_dir.mkdir()
-        (towel_dir / "architecture.md").write_text("# Architecture")
-        (towel_dir / "conventions.md").write_text("# Conventions")
+    def test_finds_dot_dreamland_directory(self, tmp_path):
+        dreamland_dir = tmp_path / ".dreamland"
+        dreamland_dir.mkdir()
+        (dreamland_dir / "architecture.md").write_text("# Architecture")
+        (dreamland_dir / "conventions.md").write_text("# Conventions")
 
         paths = find_project_contexts(tmp_path)
         assert len(paths) == 2
 
     def test_both_file_and_directory(self, tmp_path):
         (tmp_path / CONTEXT_FILENAME).write_text("# Main")
-        towel_dir = tmp_path / ".towel"
-        towel_dir.mkdir()
-        (towel_dir / "extra.md").write_text("# Extra")
+        dreamland_dir = tmp_path / ".dreamland"
+        dreamland_dir.mkdir()
+        (dreamland_dir / "extra.md").write_text("# Extra")
 
         paths = find_project_contexts(tmp_path)
         assert len(paths) == 2

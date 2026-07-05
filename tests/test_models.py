@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
-from towel.cli.models import (
+from dreamland.cli.models import (
     RECOMMENDED_MODELS,
     CachedModel,
     get_model_usage,
     is_model_cached,
     list_cached_models,
 )
-from towel.config import TowelConfig
+from dreamland.config import DreamlandConfig
 
 
 class TestCachedModel:
@@ -24,11 +24,11 @@ class TestCachedModel:
 
 class TestListCachedModels:
     def test_empty_cache(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path)
         assert list_cached_models() == []
 
     def test_finds_models(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path)
         (tmp_path / "models--org--model-name").mkdir()
         (tmp_path / "models--org--model-name" / "weights.safetensors").write_bytes(b"x" * 1000)
 
@@ -38,36 +38,36 @@ class TestListCachedModels:
         assert cached[0].size_bytes == 1000
 
     def test_skips_non_model_dirs(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path)
         (tmp_path / ".locks").mkdir()
         (tmp_path / "version.txt").touch()
 
         assert list_cached_models() == []
 
     def test_nonexistent_cache(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path / "nope")
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path / "nope")
         assert list_cached_models() == []
 
 
 class TestIsModelCached:
     def test_cached(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path)
         (tmp_path / "models--org--mymodel").mkdir()
         assert is_model_cached("org/mymodel")
 
     def test_not_cached(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.cli.models.get_hf_cache_dir", lambda: tmp_path)
+        monkeypatch.setattr("dreamland.cli.models.get_hf_cache_dir", lambda: tmp_path)
         assert not is_model_cached("org/missing")
 
 
 class TestGetModelUsage:
     def test_default_model(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         usage = get_model_usage(config)
         assert "default" in usage[config.model.name]
 
     def test_agent_models(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         usage = get_model_usage(config)
         # Built-in agents should appear
         all_agents = []
@@ -97,7 +97,7 @@ class TestModelsCLI:
     def test_list_command_exists(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["models", "list"])
@@ -106,7 +106,7 @@ class TestModelsCLI:
     def test_recommended_command(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["models", "recommended"])
@@ -116,7 +116,7 @@ class TestModelsCLI:
     def test_active_command(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["models", "active"])
@@ -126,7 +126,7 @@ class TestModelsCLI:
     def test_models_help(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["models", "--help"])

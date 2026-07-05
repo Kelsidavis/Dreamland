@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from towel.agent.conversation import Conversation, Role
-from towel.persistence.store import ConversationStore, _extract_snippet
+from dreamland.agent.conversation import Conversation, Role
+from dreamland.persistence.store import ConversationStore, _extract_snippet
 
 
 @pytest.fixture
@@ -123,20 +123,20 @@ class TestSearch:
             store,
             "few",
             [
-                (Role.USER, "one mention of towel"),
+                (Role.USER, "one mention of dreamland"),
             ],
         )
         _save_conv(
             store,
             "many",
             [
-                (Role.USER, "towel towel towel"),
-                (Role.ASSISTANT, "here is your towel"),
-                (Role.USER, "another towel please"),
+                (Role.USER, "dreamland dreamland dreamland"),
+                (Role.ASSISTANT, "here is your dreamland"),
+                (Role.USER, "another dreamland please"),
             ],
         )
 
-        results = store.search("towel")
+        results = store.search("dreamland")
         assert len(results) == 2
         # "many" should come first (more matches)
         assert results[0].conversation_id == "many"

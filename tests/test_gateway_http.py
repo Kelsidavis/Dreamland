@@ -5,15 +5,15 @@ import json
 import pytest
 from starlette.testclient import TestClient
 
-from towel.agent.conversation import Conversation, Role
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.orchestrations import OrchestrationStore
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.agent.conversation import Conversation, Role
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.orchestrations import OrchestrationStore
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def gateway(store):
-    config = TowelConfig()
+    config = DreamlandConfig()
     agent = AgentRuntime(config)
     sessions = SessionManager(store=store)
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
@@ -452,7 +452,7 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "hoopy"
-        assert data["motto"] == "Don't Panic."
+        assert data["motto"] == "It doesn't exist."
         assert "version" in data
         assert "connections" in data
         assert "sessions" in data
@@ -524,7 +524,7 @@ class TestSessionsEndpoint:
         endpoints had to special-case the field name. Expose
         `message_count` as an alias on /sessions while keeping
         `messages` for the existing web-UI / CLI callers."""
-        from towel.agent.conversation import Role
+        from dreamland.agent.conversation import Role
 
         sess = gateway.sessions.get_or_create("alias-session")
         sess.conversation.add(Role.USER, "hi")
@@ -679,7 +679,7 @@ class TestClusterNodes:
         second roundtrip."""
         from unittest.mock import MagicMock
 
-        from towel.nodes.roles import NodeRole, TaskType
+        from dreamland.nodes.roles import NodeRole, TaskType
 
         caps = {"backend": "llama", "modes": ["llama_chat"]}
         gateway._workers.register("rolled", MagicMock(), caps)
@@ -785,7 +785,7 @@ class TestClusterHandoffs:
     def _seed_handoffs(self, gateway, n_success: int, n_failed: int) -> None:
         from datetime import UTC, datetime
 
-        from towel.gateway.handoff import HandoffReason, HandoffRecord
+        from dreamland.gateway.handoff import HandoffReason, HandoffRecord
 
         for i in range(n_success):
             r = HandoffRecord(
@@ -887,7 +887,7 @@ class TestClusterHandoffs:
         import time
         from datetime import UTC, datetime
 
-        from towel.gateway.handoff import HandoffReason, HandoffRecord
+        from dreamland.gateway.handoff import HandoffReason, HandoffRecord
 
         # Started ~50ms ago — elapsed should reflect at least that.
         active = HandoffRecord(
@@ -915,7 +915,7 @@ class TestClusterHandoffs:
         record shape as the recent list (minus completed_at fields)."""
         from datetime import UTC, datetime
 
-        from towel.gateway.handoff import HandoffReason, HandoffRecord
+        from dreamland.gateway.handoff import HandoffReason, HandoffRecord
 
         # Seed one pending (started, never completed).
         active = HandoffRecord(
@@ -1156,8 +1156,8 @@ class TestWebUI:
         resp = client.get("/")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "TOWEL" in resp.text
-        assert "Don't Panic" in resp.text
+        assert "DREAMLAND" in resp.text
+        assert "It doesn't exist" in resp.text
 
     def test_index_has_websocket_js(self, client):
         resp = client.get("/")
@@ -1194,7 +1194,7 @@ class TestWebUI:
         assert "frost" in resp.text
         assert "matrix" in resp.text
         assert "solarized" in resp.text
-        assert "towel-theme" in resp.text
+        assert "dreamland-theme" in resp.text
         assert "theme-btn" in resp.text
 
     def test_index_has_command_palette(self, client):
@@ -1227,7 +1227,7 @@ class TestWebUI:
         resp = client.get("/")
         assert "renderMarkdown" in resp.text
         assert "md-content" in resp.text
-        assert "towel-session" in resp.text
+        assert "dreamland-session" in resp.text
 
 
 class TestConversationsAPI:
@@ -1568,7 +1568,7 @@ class TestConversationsAPI:
         assert resp.status_code == 200
         assert "text/markdown" in resp.headers["content-type"]
         assert "### You" in resp.text
-        assert "### Towel" in resp.text
+        assert "### Dreamland" in resp.text
         assert "attachment" in resp.headers.get("content-disposition", "")
 
     def test_export_json(self, store, client):
@@ -1635,7 +1635,7 @@ class TestConversationsAPI:
         directly; now `format=html` returns the same dark-themed
         page the export tests already validate."""
         conv = Conversation(id="exp-4", channel="api")
-        conv.add(Role.USER, "what is towel?")
+        conv.add(Role.USER, "what is dreamland?")
         conv.add(Role.ASSISTANT, "an agent runtime — don't panic")
         store.save(conv)
 
@@ -1696,7 +1696,7 @@ class TestConversationsAPI:
         # semicolons inside the filename — the wrapping quotes are
         # the only ones allowed.
         cd = resp.headers["content-disposition"]
-        # Header shape: attachment; filename="towel-<alnum>.json"
+        # Header shape: attachment; filename="dreamland-<alnum>.json"
         assert cd.startswith("attachment; filename=\"")
         # Extract everything between the first and last quote, that's
         # the filename payload.
@@ -1714,8 +1714,8 @@ class TestConversationsAPI:
         self, store, client,
     ):
         """If the conversation has a title, the export filename
-        should use it instead of the session_id. "towel-How-to-
-        deploy.md" is far more useful than "towel-openai-chatcmp.md"
+        should use it instead of the session_id. "dreamland-How-to-
+        deploy.md" is far more useful than "dreamland-openai-chatcmp.md"
         for a saved file the operator wants to find later."""
         conv = Conversation(id="openai-chatcmpl-abc123def", channel="api")
         conv.title = "How to deploy"
@@ -1807,7 +1807,7 @@ class TestSearch:
         every hit including the assistant's friendly greetings —
         which is rarely what they wanted."""
         conv = Conversation(id="role-search")
-        conv.add(Role.USER, "hello towel")
+        conv.add(Role.USER, "hello dreamland")
         conv.add(Role.ASSISTANT, "hello back")
         store.save(conv)
 
@@ -1904,7 +1904,7 @@ class TestDispatchRecentEphemeralFilter:
     `?include_ephemeral=1`."""
 
     def _record_decision(self, gateway, session_id: str):
-        from towel.gateway.dispatcher import DispatchDecision
+        from dreamland.gateway.dispatcher import DispatchDecision
         d = DispatchDecision(
             worker=None, intent="task", reason="test",
             session_id=session_id,
@@ -1918,7 +1918,7 @@ class TestDispatchRecentEphemeralFilter:
         + synthesis_ms (parallel fan-out is bound by slowest)."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -1961,7 +1961,7 @@ class TestDispatchRecentEphemeralFilter:
         session X' entry alongside other dispatch events."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -2011,7 +2011,7 @@ class TestDispatchRecentEphemeralFilter:
         log."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # No workers registered → ensemble has 0 candidates.
         # We still need a worker for the fallthrough single-worker
@@ -2075,7 +2075,7 @@ class TestDispatchRecentEphemeralFilter:
         for subsequent messages."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._stream_response)
         # Body wraps the async-for iteration in try/except.
@@ -2101,7 +2101,7 @@ class TestDispatchRecentEphemeralFilter:
         refactor can't silently re-introduce the same-tick race."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._preempt_idle_task)
         # The yield must come AFTER the worker.release call —
@@ -2130,7 +2130,7 @@ class TestDispatchRecentEphemeralFilter:
         timeout."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._preempt_idle_task)
         # Queue is popped, then notified with a job_error before
@@ -2157,7 +2157,7 @@ class TestDispatchRecentEphemeralFilter:
         outside the known set."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         assert "unrecognized role" in src
@@ -2173,8 +2173,8 @@ class TestDispatchRecentEphemeralFilter:
         allowlist + unknown-type debug log exist."""
         import inspect
 
-        from towel.gateway import server as server_mod
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway import server as server_mod
+        from dreamland.gateway.server import GatewayServer
 
         # Module-level allowlist contains every type the handler
         # dispatches on.
@@ -2205,7 +2205,7 @@ class TestDispatchRecentEphemeralFilter:
         need a websocket harness."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Parsing exists for both knobs, with the WS-namespaced
@@ -2234,7 +2234,7 @@ class TestDispatchRecentEphemeralFilter:
         websocket harness."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # The warning fires when stream=true is set alongside
@@ -2254,7 +2254,7 @@ class TestDispatchRecentEphemeralFilter:
         attempted but couldn't run" badge."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         assert "ensemble_skipped" in src
@@ -2264,13 +2264,13 @@ class TestDispatchRecentEphemeralFilter:
 
     def test_ws_quality_degraded_surfaced_in_metadata(self):
         """Parity with /api/ask's quality_degraded body field and
-        OpenAI-compat's towel.quality_degraded — when the dispatcher
+        OpenAI-compat's dreamland.quality_degraded — when the dispatcher
         routes a WS chat to an under-spec worker, the response
         metadata flags it so WS clients can render the same
         "answered on a lower-tier worker" badge."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # The check looks up the last decision and propagates the
@@ -2288,7 +2288,7 @@ class TestDispatchRecentEphemeralFilter:
         render the same "verify attempted but couldn't run" badge."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # Both skip-reason variants present in the WS handler.
@@ -2309,7 +2309,7 @@ class TestDispatchRecentEphemeralFilter:
         need a websocket harness; this is the lighter equivalent.)"""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._handle_ws)
         # The relevant metadata block builds in the ensemble short-
@@ -2330,7 +2330,7 @@ class TestDispatchRecentEphemeralFilter:
         entry surfaces with the skip reason."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # Only ONE worker — _verify_pass will return verifier_id=None.
         gateway._workers.register(
@@ -2389,7 +2389,7 @@ class TestDispatchRecentEphemeralFilter:
         Three buckets now: all empty_text, all timeouts, or mixed."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -2480,7 +2480,7 @@ class TestDispatchRecentEphemeralFilter:
         aggregate 'verify' entry under the user's session_id."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -2693,7 +2693,7 @@ class TestSimpleAskAPI:
         clients had no way to raise the ceiling for longer answers."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "w", MagicMock(),
@@ -2746,7 +2746,7 @@ class TestSimpleAskAPI:
         deterministic (0.0) or more creative (1.5+) outputs."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "w", MagicMock(),
@@ -2795,7 +2795,7 @@ class TestSimpleAskAPI:
         for over-large but otherwise-valid integers."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "w", MagicMock(),
@@ -2870,7 +2870,7 @@ class TestSimpleAskAPI:
         the whole /api/ask after an otherwise-recoverable empty-text
         path. Coerce non-numeric tps/tokens to 0 at the response
         boundary."""
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # Stub the local-agent path so we return a response whose
         # metadata carries the problematic shapes.
@@ -2924,7 +2924,7 @@ class TestSimpleAskAPI:
         worker contributes input, coordinator arbitrates."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "small", MagicMock(),
@@ -2980,7 +2980,7 @@ class TestSimpleAskAPI:
         independent attempt, coordinator reconciles."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3009,7 +3009,7 @@ class TestSimpleAskAPI:
         # reached and used, rather than the longest-answer fallback.
         # Synthesis uses generate() (not step()) so a tool-call from
         # the synthesizer can't trigger side effects.
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.runtime import GenerationResult
 
         async def fake_generate(conv, **kwargs):
             # The synthesis prompt should mention both workers' answers.
@@ -3050,7 +3050,7 @@ class TestSimpleAskAPI:
         ephemeral session per worker clones the user's messages."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3115,7 +3115,7 @@ class TestSimpleAskAPI:
         import asyncio
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3145,7 +3145,7 @@ class TestSimpleAskAPI:
         # Synthesis hangs forever — outer timeout must cancel it.
         async def fake_generate(conv, **kwargs):
             await asyncio.sleep(60)
-            from towel.agent.runtime import GenerationResult
+            from dreamland.agent.runtime import GenerationResult
             return GenerationResult(text="never returns")
 
         gateway.agent.generate = fake_generate  # type: ignore[method-assign]
@@ -3182,7 +3182,7 @@ class TestSimpleAskAPI:
         suffix on every ephemeral session id."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._ensemble_dispatch)
         # The fix adds a run_id-based suffix to the sess_id.
@@ -3205,8 +3205,8 @@ class TestSimpleAskAPI:
         the un-shuffled candidate list."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "fast", MagicMock(),
@@ -3285,8 +3285,8 @@ class TestSimpleAskAPI:
         this to attribute latency."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3345,7 +3345,7 @@ class TestSimpleAskAPI:
         to check."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -3406,7 +3406,7 @@ class TestSimpleAskAPI:
         a factual question like "capital of France"."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -3464,7 +3464,7 @@ class TestSimpleAskAPI:
         rerun-to-rerun drift."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -3512,8 +3512,8 @@ class TestSimpleAskAPI:
         arbitration doesn't drift across identical inputs."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3559,8 +3559,8 @@ class TestSimpleAskAPI:
         path: regex on the question, code-shape on the answers."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3620,8 +3620,8 @@ class TestSimpleAskAPI:
         look code-shaped."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3675,8 +3675,8 @@ class TestSimpleAskAPI:
         longest_fallback immediately."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.agent.runtime import GenerationResult
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.agent.runtime import GenerationResult
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3730,7 +3730,7 @@ class TestSimpleAskAPI:
         investigating quality regressions need this signal."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3773,7 +3773,7 @@ class TestSimpleAskAPI:
         when one worker is busy and ensemble degraded to single."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # Only one inference worker registered.
         gateway._workers.register(
@@ -3811,7 +3811,7 @@ class TestSimpleAskAPI:
         (case-folded, stripped), there's nothing to arbitrate."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3841,7 +3841,7 @@ class TestSimpleAskAPI:
 
         async def fake_gen(conv, **kwargs):
             synth_called.append(True)
-            from towel.agent.runtime import GenerationResult
+            from dreamland.agent.runtime import GenerationResult
             return GenerationResult(text="should not appear")
 
         gateway.agent.generate = fake_gen  # type: ignore[method-assign]
@@ -3868,7 +3868,7 @@ class TestSimpleAskAPI:
         answers."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3892,7 +3892,7 @@ class TestSimpleAskAPI:
         synth_called = []
         async def fake_gen(conv, **kwargs):
             synth_called.append(True)
-            from towel.agent.runtime import GenerationResult
+            from dreamland.agent.runtime import GenerationResult
             return GenerationResult(text="should not appear")
         gateway.agent.generate = fake_gen  # type: ignore[method-assign]
 
@@ -3921,7 +3921,7 @@ class TestSimpleAskAPI:
         no value when the workers already converged."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "a", MagicMock(),
@@ -3974,8 +3974,8 @@ class TestSimpleAskAPI:
         test fixtures and freshly-registered workers)."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.nodes.roles import NodeRole
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.nodes.roles import NodeRole
 
         gateway._workers.register(
             "inference-worker", MagicMock(),
@@ -4021,7 +4021,7 @@ class TestSimpleAskAPI:
         import asyncio
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "fast", MagicMock(),
@@ -4072,7 +4072,7 @@ class TestSimpleAskAPI:
         'synthesis'."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "solo", MagicMock(),
@@ -4112,7 +4112,7 @@ class TestSimpleAskAPI:
         worker."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "small", MagicMock(),
@@ -4183,7 +4183,7 @@ class TestSimpleAskAPI:
         request, not just routing one request to one worker."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # Register two workers so _pick_alternate_chat_worker finds one.
         gateway._workers.register(
@@ -4258,8 +4258,8 @@ class TestSimpleAskAPI:
         was busy."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.dispatcher import DispatchDecision
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.dispatcher import DispatchDecision
 
         gateway._workers.register(
             "small", MagicMock(),
@@ -4304,7 +4304,7 @@ class TestSimpleAskAPI:
         opt-in so clients don't have to special-case its absence."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -4321,7 +4321,7 @@ class TestSimpleAskAPI:
         gateway._quick_remote_infer = fake_quick  # type: ignore[method-assign]
 
         async def fake_route(_msg, _sid):
-            from towel.gateway.dispatcher import DispatchDecision
+            from dreamland.gateway.dispatcher import DispatchDecision
             dec = DispatchDecision(
                 worker=gateway._workers.get("primary"),
                 intent="chat",
@@ -4348,7 +4348,7 @@ class TestSimpleAskAPI:
         confirmation; long substantive text means correction."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -4414,7 +4414,7 @@ class TestSimpleAskAPI:
         which gates on length."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -4477,7 +4477,7 @@ class TestSimpleAskAPI:
         word VERIFIED appears in passing."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -4537,7 +4537,7 @@ class TestSimpleAskAPI:
         verification ran."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         gateway._workers.register(
             "primary", MagicMock(),
@@ -4582,7 +4582,7 @@ class TestSimpleAskAPI:
 
     def test_ask_accepts_session_id_key(self, gateway, client):
         """Clients reasonably pass ``session_id`` (the convention used
-        everywhere else in towel — path params, internal APIs, the
+        everywhere else in dreamland — path params, internal APIs, the
         session list). Previously only ``session`` was honored, so
         ``session_id`` was silently dropped and every such request
         was merged into ``api-default``, sharing context with everyone."""
@@ -4628,8 +4628,8 @@ class TestSimpleAskAPI:
         identity_override flows as a per-call kwarg now."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         baseline_identity = gateway.config.identity
 
@@ -4725,8 +4725,8 @@ class TestSimpleAskAPI:
         failure: 'primary didn't give us a useful answer.'"""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         fake_primary = WorkerInfo(id="primary-fail", ws=AsyncMock(), capabilities={})
         fake_alt = WorkerInfo(
@@ -4778,7 +4778,7 @@ class TestSimpleAskAPI:
         type name when `str(exc)` is empty."""
         from unittest.mock import AsyncMock
 
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.gateway.workers import WorkerInfo
 
         only_worker = WorkerInfo(id="w-empty-err", ws=AsyncMock(), capabilities={})
         gateway._workers._workers["w-empty-err"] = only_worker
@@ -4816,7 +4816,7 @@ class TestSimpleAskAPI:
         500 — not silently masked."""
         from unittest.mock import AsyncMock
 
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.gateway.workers import WorkerInfo
 
         only_worker = WorkerInfo(id="only-one", ws=AsyncMock(), capabilities={})
         gateway._workers._workers["only-one"] = only_worker
@@ -4849,8 +4849,8 @@ class TestSimpleAskAPI:
         got a 500."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         # Stub _route_by_role so the request flows into the chat path
         # without needing a real dispatcher decision.
@@ -4919,8 +4919,8 @@ class TestSimpleAskAPI:
         "no alternate worker" reason. Surface the actual cause."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         primary = WorkerInfo(id="empty-primary", ws=AsyncMock(), capabilities={})
         alt = WorkerInfo(
@@ -4972,8 +4972,8 @@ class TestSimpleAskAPI:
         worker."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         primary = WorkerInfo(id="dual-primary", ws=AsyncMock(), capabilities={})
         alt = WorkerInfo(
@@ -5023,8 +5023,8 @@ class TestSimpleAskAPI:
         signal."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         solo = WorkerInfo(id="solo", ws=AsyncMock(), capabilities={})
         gateway._workers._workers["solo"] = solo
@@ -5525,7 +5525,7 @@ class TestOrchestrationHistory:
         assert raw[oid]["created_at"]
 
     def test_running_records_marked_interrupted_on_restart(self, store):
-        from towel.persistence.orchestrations import OrchestrationStore
+        from dreamland.persistence.orchestrations import OrchestrationStore
         orch_store = OrchestrationStore(
             path=store.store_dir / "orchestrations.json",
         )
@@ -5533,7 +5533,7 @@ class TestOrchestrationHistory:
             "dead1": {"goal": "g", "state": "running",
                       "created_at": "2026-07-03T00:00:00+00:00", "tasks": []},
         })
-        config = TowelConfig()
+        config = DreamlandConfig()
         gw = GatewayServer(
             config=config,
             agent=AgentRuntime(config),
@@ -5563,7 +5563,7 @@ class TestOrchestrationHistory:
         }).json()["orchestration_id"]
 
         # Fresh gateway sharing the same store path = simulated restart.
-        config = TowelConfig()
+        config = DreamlandConfig()
         gw2 = GatewayServer(
             config=config,
             agent=AgentRuntime(config),
@@ -5653,8 +5653,8 @@ class TestOrchestrateFiles:
         endpoints must work from persisted history too."""
         oid = self._run_orchestration(gateway, client, tmp_path)
         gw2 = GatewayServer(
-            config=TowelConfig(),
-            agent=AgentRuntime(TowelConfig()),
+            config=DreamlandConfig(),
+            agent=AgentRuntime(DreamlandConfig()),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=store.store_dir / "p3.json"),
             worker_state_store=WorkerStateStore(path=store.store_dir / "w3.json"),
@@ -5853,7 +5853,7 @@ class TestLocalPlanner:
 
         import pytest as _pytest
 
-        from towel.agent.orchestrator import WorkerDispatchError
+        from dreamland.agent.orchestrator import WorkerDispatchError
         self._set_local_model(gateway, "Qwen3.6-35B-MLX-8bit")
         with _pytest.raises(WorkerDispatchError):
             asyncio.run(gateway.dispatch_role_task(
@@ -5899,7 +5899,7 @@ class TestOrchestrateArchive:
         resp = client.get(f"/api/orchestrate/{oid}/archive")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/zip"
-        assert f"towel-{oid}.zip" in resp.headers["content-disposition"]
+        assert f"dreamland-{oid}.zip" in resp.headers["content-disposition"]
         zf = zipfile.ZipFile(io.BytesIO(resp.content))
         names = zf.namelist()
         assert "pkg/app.py" in names
@@ -6025,7 +6025,7 @@ class TestGitHistory:
         commits = log_resp.json()["commits"]
         # Seed commit + result commit, newest first.
         assert len(commits) == 2
-        assert "towel:" in commits[0]["message"]
+        assert "dreamland:" in commits[0]["message"]
         assert commits[1]["message"].startswith("Seed files:")
 
         # The result commit's diff shows the change the run made.
@@ -6169,7 +6169,7 @@ class TestGitSmartHTTP:
                 ["git", "-C", str(dest), "log", "--format=%s"],
                 capture_output=True, text=True, timeout=10,
             )
-            assert "towel:" in log.stdout
+            assert "dreamland:" in log.stdout
             assert "Seed files:" in log.stdout
         finally:
             server.should_exit = True

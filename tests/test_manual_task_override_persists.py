@@ -16,13 +16,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.nodes.roles import TaskType, assign_roles, assign_tasks
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.nodes.roles import TaskType, assign_roles, assign_tasks
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class _FakeAgent:
@@ -40,7 +40,7 @@ def gateway(store):
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
     return GatewayServer(
-        config=TowelConfig(),
+        config=DreamlandConfig(),
         agent=_FakeAgent(),
         sessions=sessions,
         pin_store=pin_store,
@@ -202,7 +202,7 @@ class TestManualTaskOverridePersistsAcrossRestart:
         pin_store = SessionPinStore(path=tmp_path / "pins.json")
         state_path = tmp_path / "worker_state.json"
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=sessions,
             pin_store=pin_store,
@@ -223,7 +223,7 @@ class TestManualTaskOverridePersistsAcrossRestart:
         # Second coordinator instance — same on-disk state file. The manual
         # override should be hydrated even before the worker connects.
         gateway2 = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -235,7 +235,7 @@ class TestManualTaskOverridePersistsAcrossRestart:
     def test_clearing_override_removes_disk_entry(self, tmp_path, store):
         state_path = tmp_path / "worker_state.json"
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -251,7 +251,7 @@ class TestManualTaskOverridePersistsAcrossRestart:
 
         # New coordinator picking up the same file — override should be gone.
         gateway2 = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -265,7 +265,7 @@ class TestManualTaskOverridePersistsAcrossRestart:
         capabilities right now so the UI reflects auto state immediately."""
         state_path = tmp_path / "worker_state.json"
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -307,7 +307,7 @@ class TestWorkersEndpointSurfacesOverrideFlag:
 
     def test_flag_true_when_override_present(self, tmp_path, store):
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -325,7 +325,7 @@ class TestWorkersEndpointSurfacesOverrideFlag:
 
     def test_flag_false_when_no_override(self, tmp_path, store):
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -363,7 +363,7 @@ class TestOfflinePersistedSurface:
             encoding="utf-8",
         )
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -398,7 +398,7 @@ class TestOfflinePersistedSurface:
             encoding="utf-8",
         )
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -420,7 +420,7 @@ class TestOfflinePersistedSurface:
 
     def test_setting_override_on_unknown_worker_rejected(self, tmp_path, store):
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -457,7 +457,7 @@ class TestUnknownTaskOnDisk:
             encoding="utf-8",
         )
         gateway = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_FakeAgent(),
             sessions=SessionManager(store=store),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),

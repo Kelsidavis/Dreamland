@@ -1,9 +1,9 @@
-# Convenience targets for Towel development.
+# Convenience targets for Dreamland development.
 #
 # Everything routes through the project's own virtualenv at .venv (created by
 # ``pip install -e ".[all,dev]"``) so contributors don't have to think about
 # which Python interpreter to call. Override PYTHON= on the make command line
-# if you've installed Towel system-wide.
+# if you've installed Dreamland system-wide.
 
 PYTHON ?= .venv/bin/python
 PYTEST ?= $(PYTHON) -m pytest
@@ -12,14 +12,14 @@ RUFF   ?= $(PYTHON) -m ruff
 .PHONY: help test test-fast lint fmt fix doctor clean
 
 help:
-	@echo "Towel — common dev targets"
+	@echo "Dreamland — common dev targets"
 	@echo ""
 	@echo "  make test       Run the full pytest suite (~30s on a warm cache)"
 	@echo "  make test-fast  Run tests with -x (stop at first failure)"
 	@echo "  make lint       ruff check src/ tests/"
 	@echo "  make fmt        ruff format src/ tests/"
 	@echo "  make fix        ruff check --fix src/ tests/ (auto-fix lints)"
-	@echo "  make doctor     Run towel doctor against the current env"
+	@echo "  make doctor     Run dreamland doctor against the current env"
 	@echo "  make clean      Remove caches and build artefacts"
 
 test:
@@ -29,16 +29,16 @@ test-fast:
 	$(PYTEST) tests/ -q -x
 
 lint:
-	$(RUFF) check src/towel/ tests/
+	$(RUFF) check src/dreamland/ tests/
 
 fmt:
-	$(RUFF) format src/towel/ tests/
+	$(RUFF) format src/dreamland/ tests/
 
 fix:
-	$(RUFF) check --fix src/towel/ tests/
+	$(RUFF) check --fix src/dreamland/ tests/
 
 doctor:
-	$(PYTHON) -m towel.cli.main doctor
+	$(PYTHON) -m dreamland.cli.main doctor
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

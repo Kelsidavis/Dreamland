@@ -2,7 +2,7 @@
 
 import json
 
-from towel.persistence.orchestrations import MAX_RECORDS, OrchestrationStore
+from dreamland.persistence.orchestrations import MAX_RECORDS, OrchestrationStore
 
 
 class TestOrchestrationStore:

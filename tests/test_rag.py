@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.agent.rag import RAGIndex
+from dreamland.agent.rag import RAGIndex
 
 
 class TestRAGIndex:

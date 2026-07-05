@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.agent.middleware import (
+from dreamland.agent.middleware import (
     MiddlewareContext,
     MiddlewareStack,
     _cost_state,

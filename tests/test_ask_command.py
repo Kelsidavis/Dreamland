@@ -1,12 +1,12 @@
-"""Tests for the towel ask command."""
+"""Tests for the dreamland ask command."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
 
-from towel.agent.conversation import Message, Role
-from towel.agent.events import AgentEvent
-from towel.cli.main import cli
+from dreamland.agent.conversation import Message, Role
+from dreamland.agent.events import AgentEvent
+from dreamland.cli.main import cli
 
 
 class TestAskCommand:
@@ -20,7 +20,7 @@ class TestAskCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["ask", "--help"])
         assert result.exit_code == 0
-        assert "towel ask" in result.output
+        assert "dreamland ask" in result.output
         assert "scriptable" in result.output.lower() or "pipeable" in result.output.lower()
 
     def test_raw_flag_documented(self):
@@ -77,8 +77,8 @@ class TestAskCommandIntegration:
         agent.step_streaming = mock_stream
         return agent
 
-    @patch("towel.cli.main._build_skill_registry")
-    @patch("towel.agent.runtime.AgentRuntime")
+    @patch("dreamland.cli.main._build_skill_registry")
+    @patch("dreamland.agent.runtime.AgentRuntime")
     def test_basic_ask(self, mock_runtime_cls, mock_build_skills):
         agent = self._mock_agent()
         mock_runtime_cls.return_value = agent
@@ -89,8 +89,8 @@ class TestAskCommandIntegration:
         # Should not crash — model loading will fail but that's ok
         # We're testing the command plumbing, not the model
 
-    @patch("towel.cli.main._build_skill_registry")
-    @patch("towel.agent.runtime.AgentRuntime")
+    @patch("dreamland.cli.main._build_skill_registry")
+    @patch("dreamland.agent.runtime.AgentRuntime")
     def test_raw_mode(self, mock_runtime_cls, mock_build_skills):
         agent = self._mock_agent()
         mock_runtime_cls.return_value = agent

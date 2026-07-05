@@ -12,7 +12,7 @@ for 22s instead of the 2B model that could answer in 1s.
 
 from __future__ import annotations
 
-from towel.nodes.roles import (
+from dreamland.nodes.roles import (
     TaskType,
     classify_message_intent,
     classify_task_type,
@@ -137,7 +137,7 @@ class TestExistingTaskTypes:
         # Compile-context phrases still match.
         assert classify_task_type("compile the kernel") == TaskType.BUILD
         assert classify_task_type("npm run build") == TaskType.BUILD
-        assert classify_task_type("pip install towel") == TaskType.BUILD
+        assert classify_task_type("pip install dreamland") == TaskType.BUILD
         assert classify_task_type("build the project") == TaskType.BUILD
         assert classify_task_type("build the docker image") == TaskType.BUILD
         # Generation-context phrases must NOT match BUILD — they
@@ -154,7 +154,7 @@ class TestFastTaskRouting:
     worker available — not whichever happens to be first in the dict."""
 
     def test_chat_picks_smaller_vram_worker(self):
-        from towel.nodes.roles import TaskType, best_node_for_task
+        from dreamland.nodes.roles import TaskType, best_node_for_task
 
         small = {
             "id": "fast-w", "enabled": True, "busy": False,
@@ -175,8 +175,8 @@ class TestFastTaskRouting:
         # intent=chat → NodeRole.CLASSIFIER per _role_for_intent.
         # Verify the dispatcher fallback doesn't accidentally pick
         # the heaviest worker for chat-class requests.
-        from towel.gateway.dispatcher import _role_for_intent
-        from towel.nodes.roles import NodeRole
+        from dreamland.gateway.dispatcher import _role_for_intent
+        from dreamland.nodes.roles import NodeRole
 
         assert _role_for_intent("chat") == NodeRole.CLASSIFIER
         assert _role_for_intent("task") == NodeRole.INFERENCE
@@ -214,14 +214,14 @@ class TestQualityTaskRouting:
         return small, big
 
     def test_explain_routes_to_larger_worker(self):
-        from towel.nodes.roles import TaskType, best_node_for_task
+        from dreamland.nodes.roles import TaskType, best_node_for_task
         small, big = self._stub_workers(TaskType.EXPLAIN)
         for nodes in ([small, big], [big, small]):
             chosen = best_node_for_task(TaskType.EXPLAIN, nodes)
             assert chosen is big, f"got {chosen['id']}"
 
     def test_translate_routes_to_larger_worker(self):
-        from towel.nodes.roles import TaskType, best_node_for_task
+        from dreamland.nodes.roles import TaskType, best_node_for_task
         small, big = self._stub_workers(TaskType.TRANSLATE)
         for nodes in ([small, big], [big, small]):
             chosen = best_node_for_task(TaskType.TRANSLATE, nodes)
@@ -236,7 +236,7 @@ class TestQualityTaskRouting:
         slipped in: live an "explain" landed on the small worker and
         timed out. New INFERENCE tasks added in the future will trip
         this test if they forget to specify a preference."""
-        from towel.nodes.roles import TASK_REQUIREMENTS, NodeRole
+        from dreamland.nodes.roles import TASK_REQUIREMENTS, NodeRole
         missing = []
         for task, reqs in TASK_REQUIREMENTS.items():
             roles = reqs.get("roles", [])

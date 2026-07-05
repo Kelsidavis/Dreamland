@@ -1,6 +1,6 @@
 """Tests for context window management."""
 
-from towel.agent.context import (
+from dreamland.agent.context import (
     ContextBudget,
     count_tokens_fallback,
     estimate_output_reserve,
@@ -8,7 +8,7 @@ from towel.agent.context import (
     maybe_compact_conversation,
     select_context_window,
 )
-from towel.agent.conversation import Conversation, Role
+from dreamland.agent.conversation import Conversation, Role
 
 
 def _msg(role: str, content: str) -> dict[str, str]:
@@ -368,7 +368,7 @@ class TestPersistentCompaction:
             conv.add(Role.ASSISTANT, f"Answer {i} " * 8)
 
         monkeypatch.setattr(
-            "towel.agent.context._maybe_external_compact_summary",
+            "dreamland.agent.context._maybe_external_compact_summary",
             lambda text, max_words: "Dense external summary",
         )
 
@@ -393,7 +393,7 @@ class TestPersistentCompaction:
             conv.add(Role.ASSISTANT, f"Answer {i} " * 8)
 
         monkeypatch.setattr(
-            "towel.agent.context._maybe_external_compact_summary",
+            "dreamland.agent.context._maybe_external_compact_summary",
             lambda text, max_words: None,
         )
 

@@ -1,6 +1,6 @@
 """Tests for the plugin system."""
 
-from towel.skills.plugin import (
+from dreamland.skills.plugin import (
     PluginManifest,
     create_plugin_scaffold,
     discover_plugins,
@@ -12,7 +12,7 @@ class TestPluginManifest:
     def test_from_toml(self, tmp_path):
         d = tmp_path / "my-plugin"
         d.mkdir()
-        (d / "towel-plugin.toml").write_text("""
+        (d / "dreamland-plugin.toml").write_text("""
 [plugin]
 name = "test-plugin"
 version = "1.2.3"
@@ -20,7 +20,7 @@ description = "A test"
 author = "Tester"
 tags = ["test"]
 """)
-        manifest = PluginManifest.from_toml(d / "towel-plugin.toml")
+        manifest = PluginManifest.from_toml(d / "dreamland-plugin.toml")
         assert manifest is not None
         assert manifest.name == "test-plugin"
         assert manifest.version == "1.2.3"
@@ -41,7 +41,7 @@ class TestDiscoverPlugins:
     def test_finds_plugin(self, tmp_path):
         d = tmp_path / "my-plugin"
         d.mkdir()
-        (d / "towel-plugin.toml").write_text('[plugin]\nname = "found"\nversion = "1.0.0"')
+        (d / "dreamland-plugin.toml").write_text('[plugin]\nname = "found"\nversion = "1.0.0"')
         found = discover_plugins([tmp_path])
         assert len(found) == 1
         assert found[0].name == "found"
@@ -51,7 +51,7 @@ class TestValidatePlugin:
     def test_valid(self, tmp_path):
         d = tmp_path / "good"
         d.mkdir()
-        (d / "towel-plugin.toml").write_text('[plugin]\nname = "good"\nversion = "1.0.0"')
+        (d / "dreamland-plugin.toml").write_text('[plugin]\nname = "good"\nversion = "1.0.0"')
         (d / "skill.py").write_text("pass")
         issues = validate_plugin(d)
         assert issues == []
@@ -65,7 +65,7 @@ class TestValidatePlugin:
     def test_missing_skill(self, tmp_path):
         d = tmp_path / "no-skill"
         d.mkdir()
-        (d / "towel-plugin.toml").write_text('[plugin]\nname = "no-skill"\nversion = "1.0.0"')
+        (d / "dreamland-plugin.toml").write_text('[plugin]\nname = "no-skill"\nversion = "1.0.0"')
         issues = validate_plugin(d)
         assert any("skill file" in i.lower() for i in issues)
 
@@ -73,9 +73,9 @@ class TestValidatePlugin:
 class TestCreateScaffold:
     def test_creates_files(self, tmp_path):
         path = create_plugin_scaffold("my-cool-plugin", output_dir=tmp_path)
-        assert (path / "towel-plugin.toml").exists()
+        assert (path / "dreamland-plugin.toml").exists()
         assert (path / "skill.py").exists()
-        manifest_text = (path / "towel-plugin.toml").read_text()
+        manifest_text = (path / "dreamland-plugin.toml").read_text()
         assert "my-cool-plugin" in manifest_text
         skill_text = (path / "skill.py").read_text()
         assert "MyCoolPluginSkill" in skill_text

@@ -1,7 +1,7 @@
 """Tests for node capability tracking and cluster scheduling."""
 
-from towel.nodes.capability import ContextSlot, NodeCapability, NodeResources
-from towel.nodes.tracker import NodeTracker
+from dreamland.nodes.capability import ContextSlot, NodeCapability, NodeResources
+from dreamland.nodes.tracker import NodeTracker
 
 
 class TestNodeResources:
@@ -113,7 +113,7 @@ class TestNodeCapability:
         node = NodeCapability(worker_id="w1", context_window=8192)
         # Bypass the cap-on-write path entirely — simulate the
         # historical bug where a slot landed with raw bogus tokens.
-        from towel.nodes.capability import ContextSlot
+        from dreamland.nodes.capability import ContextSlot
         node.context_slots.append(
             ContextSlot(
                 session_id="legacy-bad",
@@ -134,7 +134,7 @@ class TestNodeCapability:
         contributes at most context_window, so N bad slots → N×window
         (which then clamps to pressure=1.0 via the existing min(1.0)
         in context_pressure)."""
-        from towel.nodes.capability import ContextSlot
+        from dreamland.nodes.capability import ContextSlot
         node = NodeCapability(worker_id="w1", context_window=8192)
         for i in range(3):
             node.context_slots.append(
@@ -154,7 +154,7 @@ class TestNodeCapability:
         be computed — return the raw sum so callers aren't surprised
         by silent data drops on workers that didn't advertise a
         window."""
-        from towel.nodes.capability import ContextSlot
+        from dreamland.nodes.capability import ContextSlot
         node = NodeCapability(worker_id="w1", context_window=0)
         node.context_slots.append(
             ContextSlot(session_id="s", tokens_used=99_999, context_window=0)
@@ -294,7 +294,7 @@ class TestAssignRolesDefensiveCoercion:
     can't take the coordinator's register path down with it."""
 
     def test_non_list_gpus_does_not_crash(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # String gpus (e.g. a worker that serialized incorrectly):
         # iteration yields chars; .get() on a char would AttributeError.
         roles = assign_roles({"backend": "llama", "gpus": "not-a-list"})
@@ -302,13 +302,13 @@ class TestAssignRolesDefensiveCoercion:
         assert roles  # at least CLASSIFIER + GENERAL for llama
 
     def test_dict_gpus_does_not_crash(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # Dict gpus: iteration yields keys (strings); same crash class.
         roles = assign_roles({"backend": "llama", "gpus": {"a": "b"}})
         assert roles
 
     def test_none_gpus_does_not_crash(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # Explicit None for gpus — the .get() default of [] would
         # only apply if the key was MISSING; an explicit None bypasses
         # it and breaks `sum(g.get(...) ...)`.
@@ -316,7 +316,7 @@ class TestAssignRolesDefensiveCoercion:
         assert roles
 
     def test_non_dict_gpu_entries_skipped(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # Mixed list with a non-dict entry — the bad entry's .get()
         # raises. Defensive filter drops it instead.
         roles = assign_roles({
@@ -324,11 +324,11 @@ class TestAssignRolesDefensiveCoercion:
             "gpus": [{"vram_mb": 8000}, "garbage", 42],
         })
         # Valid entry survived, total_vram_mb is computed from it.
-        from towel.nodes.roles import NodeRole
+        from dreamland.nodes.roles import NodeRole
         assert NodeRole.INFERENCE in roles
 
     def test_non_numeric_context_window_treated_as_zero(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # A worker reporting context_window as a string (e.g. "8192"
         # instead of the int) used to compare oddly in `context_window
         # >= 32768` — string vs int compare raises TypeError in
@@ -338,17 +338,17 @@ class TestAssignRolesDefensiveCoercion:
         assert roles
 
     def test_non_string_backend_treated_as_empty(self):
-        from towel.nodes.roles import assign_roles
+        from dreamland.nodes.roles import assign_roles
         # A worker registering with backend=42 (typo, buggy serialiser)
         # used to compare oddly against "claude" / "llama" / etc. and
         # silently miss every role check. Coerce to empty string so
         # the role assignment falls through to defaults.
         roles = assign_roles({"backend": 42})
-        from towel.nodes.roles import NodeRole
+        from dreamland.nodes.roles import NodeRole
         assert NodeRole.GENERAL in roles
 
     def test_assign_tasks_also_coerces_defensively(self):
-        from towel.nodes.roles import NodeRole, assign_tasks
+        from dreamland.nodes.roles import NodeRole, assign_tasks
         # Same defensive shape on assign_tasks — it shares the
         # capabilities dereferencing pattern and would crash the same
         # way on the same inputs.
@@ -366,7 +366,7 @@ class TestAssignRolesDefensiveCoercion:
         ``_safe_int`` helper returns 0 for non-numeric inputs, so a
         garbage capability field downgrades the worker to ``low``
         instead of taking out the whole render."""
-        from towel.nodes.roles import worker_quality_tier
+        from dreamland.nodes.roles import worker_quality_tier
         assert worker_quality_tier({"total_vram_mb": "huge"}) == "low"
         assert worker_quality_tier({"total_vram_mb": [1, 2]}) == "low"
         assert worker_quality_tier({"total_vram_mb": {"v": 1}}) == "low"
@@ -383,7 +383,7 @@ class TestAssignRolesDefensiveCoercion:
         500 every /cluster/nodes render. Defensive coercion at the
         boundary keeps the cluster view alive even when one worker's
         capability blob is garbage."""
-        from towel.nodes.capability import resources_from_worker_caps
+        from dreamland.nodes.capability import resources_from_worker_caps
         # Top-level garbage vram falls through to the per-GPU sum.
         r = resources_from_worker_caps({"total_vram_mb": "huge", "gpus": []})
         assert r.vram_total_mb == 0
@@ -398,7 +398,7 @@ class TestAssignRolesDefensiveCoercion:
         reporting ``ram_total_mb`` or ``ram_available_mb`` as a
         garbage value used to crash inside the ``int(...) - int(...)``
         subtraction."""
-        from towel.nodes.capability import resources_from_worker_caps
+        from dreamland.nodes.capability import resources_from_worker_caps
         r = resources_from_worker_caps({
             "resources": {"ram_total_mb": "huge", "ram_available_mb": 5000},
         })
@@ -410,7 +410,7 @@ class TestAssignRolesDefensiveCoercion:
         """Same defensive shape on the dispatcher's gate check —
         a non-numeric ``total_vram_mb`` used to crash inside
         ``int(...)`` and 500 the user's routing request."""
-        from towel.nodes.roles import TaskType, node_meets_task_requirements
+        from dreamland.nodes.roles import TaskType, node_meets_task_requirements
         # CODE_REVIEW has min_vram_mb=4000. A garbage vram value
         # coerces to 0, so the gate correctly says "doesn't meet".
         node = {"capabilities": {"total_vram_mb": "huge", "context_window": 32768}}

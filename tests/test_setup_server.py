@@ -7,8 +7,8 @@ from pathlib import Path
 from starlette.routing import Mount, Route
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.setup_server import (
+from dreamland.config import DreamlandConfig
+from dreamland.setup_server import (
     _apply_form_to_config,
     _list_mlx_cached_models,
     build_app,
@@ -18,12 +18,12 @@ from towel.setup_server import (
 
 class TestApplyFormToConfig:
     def test_valid_form_persists_all_fields(self):
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         ok, err = _apply_form_to_config(
             cfg,
             {
                 "backend": "ollama",
-                "identity": "You are Towel testing.",
+                "identity": "You are Dreamland testing.",
                 "ollama_url": "http://192.168.1.10:11434",
                 "llama_url": "",
                 "claude_model": "",
@@ -32,19 +32,19 @@ class TestApplyFormToConfig:
         )
         assert ok and err is None
         assert cfg.backend == "ollama"
-        assert cfg.identity == "You are Towel testing."
+        assert cfg.identity == "You are Dreamland testing."
         assert cfg.ollama_url == "http://192.168.1.10:11434"
         assert cfg.model.name == "qwen3.6:27b"
 
     def test_unknown_backend_rejected(self):
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         ok, err = _apply_form_to_config(cfg, {"backend": "bogus"})
         assert not ok
         assert "Unknown backend" in (err or "")
 
     def test_empty_backend_means_auto_detect(self):
         # An empty backend is valid — it means "let the CLI auto-detect".
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         ok, _err = _apply_form_to_config(cfg, {"backend": "", "identity": "x"})
         assert ok
         assert cfg.backend == ""
@@ -52,7 +52,7 @@ class TestApplyFormToConfig:
     def test_llama_and_claude_dont_overwrite_model_name(self):
         # Both backends drive their own model selection through other fields,
         # so a stray model_name in the form must not clobber config.model.name.
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         original = cfg.model.name
         _apply_form_to_config(
             cfg,
@@ -67,7 +67,7 @@ class TestApplyFormToConfig:
         assert cfg.claude_model == "opus"
 
     def test_empty_identity_keeps_existing(self):
-        cfg = TowelConfig(identity="existing identity")
+        cfg = DreamlandConfig(identity="existing identity")
         _apply_form_to_config(cfg, {"backend": "mlx", "identity": ""})
         assert cfg.identity == "existing identity"
 
@@ -79,7 +79,7 @@ class TestApplyFormToConfig:
         error — and a misrouted form field is a 400-class problem,
         not a 500. Defensive isinstance(value, str) check at every
         string-field read keeps the handler resilient."""
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         # Non-string backend → treated as empty (== "auto-detect"),
         # which is a valid backend value per _VALID_BACKENDS.
         ok, err = _apply_form_to_config(cfg, {"backend": 42})
@@ -87,7 +87,7 @@ class TestApplyFormToConfig:
         # Non-string identity / urls / model_name don't crash —
         # they fall back to "" (which then leaves config.identity
         # unchanged via the `identity or config.identity` chain).
-        cfg2 = TowelConfig(identity="kept")
+        cfg2 = DreamlandConfig(identity="kept")
         ok, err = _apply_form_to_config(cfg2, {
             "backend": "mlx",
             "identity": ["not", "a", "string"],
@@ -121,7 +121,7 @@ class TestSetupRoutes:
         assert "/api/setup/save" in paths
         assert any(isinstance(r, Route) and "/api/setup/backends/" in r.path for r in routes)
         # Static mount should be present when the web dir exists.
-        web_dir = Path(__file__).resolve().parent.parent / "src" / "towel" / "web"
+        web_dir = Path(__file__).resolve().parent.parent / "src" / "dreamland" / "web"
         if web_dir.is_dir():
             assert any(isinstance(r, Mount) for r in routes)
 
@@ -213,4 +213,4 @@ class TestStandaloneApp:
             resp = client.get("/")
         assert resp.status_code == 200
         # The HTML should contain the wizard title and form sections.
-        assert "TOWEL SETUP" in resp.text or "Towel Setup" in resp.text
+        assert "DREAMLAND SETUP" in resp.text or "Dreamland Setup" in resp.text

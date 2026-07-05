@@ -6,7 +6,7 @@ index.html so a refactor can't silently drop the feature."""
 from pathlib import Path
 
 HTML = (
-    Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html"
+    Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
 ).read_text()
 
 
@@ -97,7 +97,7 @@ class TestChatSessionResume:
         # The old localStorage guard skipped transcript restore on
         # every reload after the first — users saw a welcome screen
         # over their existing conversation.
-        assert "towel-session-loaded" not in HTML
+        assert "dreamland-session-loaded" not in HTML
 
     def test_reconnect_does_not_reclobber_transcript(self):
         assert "Reconnects skip this" in HTML
@@ -137,7 +137,7 @@ class TestSeedFileWidget:
     def test_no_raw_nul_bytes(self):
         from pathlib import Path
         raw = (
-            Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html"
+            Path(__file__).parent.parent / "src" / "dreamland" / "web" / "index.html"
         ).read_bytes()
         assert b"\x00" not in raw
 

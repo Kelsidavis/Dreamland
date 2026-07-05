@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from towel.agent.conversation import Conversation, Role
-from towel.persistence.export import export_html, export_json, export_markdown, export_text
+from dreamland.agent.conversation import Conversation, Role
+from dreamland.persistence.export import export_html, export_json, export_markdown, export_text
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ class TestMarkdownExport:
         c = Conversation(id="titled-html", channel="cli")
         c.title = "Recipe Notes"
         c.add(Role.USER, "How do I make pancakes?")
-        from towel.persistence.export import export_html
+        from dreamland.persistence.export import export_html
         html_out = export_html(c)
         assert "<title>Recipe Notes</title>" in html_out
         assert "<h1>Recipe Notes</h1>" in html_out
@@ -77,7 +77,7 @@ class TestMarkdownExport:
 
     def test_assistant_messages(self, conv):
         md = export_markdown(conv)
-        assert "### Towel" in md
+        assert "### Dreamland" in md
         assert "maple syrup" in md
 
     def test_tool_messages_in_details(self, conv_with_tools):
@@ -89,7 +89,7 @@ class TestMarkdownExport:
 
     def test_footer(self, conv):
         md = export_markdown(conv)
-        assert "Don't Panic" in md
+        assert "It doesn't exist" in md
 
     def test_metadata_flag(self, conv):
         without = export_markdown(conv, include_metadata=False)
@@ -135,7 +135,7 @@ class TestMarkdownExport:
         key is MISSING — an explicit ``ensemble_arbitration: None``
         bypasses it and used to bring down the export. Coercing to
         str at the boundary keeps the page renderable."""
-        from towel.persistence.export import export_html
+        from dreamland.persistence.export import export_html
         c = Conversation(id="bad-arb", channel="api")
         c.add(Role.USER, "hi")
         c.add(
@@ -225,7 +225,7 @@ class TestTextExportTitle:
         set title (or auto-summary when no title is set) so a
         reader skimming saved txt files sees the name first. The
         session id still appears for cross-referencing."""
-        from towel.persistence.export import export_text
+        from dreamland.persistence.export import export_text
 
         c = Conversation(id="text-titled", channel="cli")
         c.title = "My Deploy Notes"
@@ -237,14 +237,14 @@ class TestTextExportTitle:
     def test_text_header_falls_back_to_summary_without_title(self):
         """No explicit title → use auto-derived summary, matching
         the markdown/html exports."""
-        from towel.persistence.export import export_text
+        from dreamland.persistence.export import export_text
 
         c = Conversation(id="text-untitled", channel="cli")
-        c.add(Role.USER, "what is towel")
+        c.add(Role.USER, "what is dreamland")
         out = export_text(c)
         # display_title falls back to summary (first user message),
         # so the heading reflects the actual content.
-        assert "Conversation: what is towel" in out
+        assert "Conversation: what is dreamland" in out
 
 
 class TestTextExport:
@@ -260,7 +260,7 @@ class TestTextExport:
 
     def test_assistant_messages(self, conv):
         txt = export_text(conv)
-        assert "[towel]" in txt
+        assert "[dreamland]" in txt
 
     def test_tool_truncated(self, conv_with_tools):
         txt = export_text(conv_with_tools)
@@ -318,7 +318,7 @@ class TestHtmlExport:
 
     def test_assistant_messages(self, conv):
         result = export_html(conv)
-        assert "Towel" in result
+        assert "Dreamland" in result
         assert "maple syrup" in result
 
     def test_tool_messages(self, conv_with_tools):
@@ -342,4 +342,4 @@ class TestHtmlExport:
 
     def test_footer(self, conv):
         result = export_html(conv)
-        assert "Don't Panic" in result
+        assert "It doesn't exist" in result

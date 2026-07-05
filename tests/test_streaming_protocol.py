@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 
-from towel.agent.streaming_protocol import build_sse_routes
+from dreamland.agent.streaming_protocol import build_sse_routes
 
 
 def _stream_post_source() -> str:

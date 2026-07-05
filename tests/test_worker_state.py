@@ -1,12 +1,12 @@
 """Tests for worker operational state persistence."""
 
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class TestWorkerStateStore:
@@ -102,8 +102,8 @@ class TestGatewayWorkerStatePersistence:
         worker_state_store.save({"desktop-1": {"enabled": False, "draining": True}})
 
         gateway = GatewayServer(
-            config=TowelConfig(),
-            agent=AgentRuntime(TowelConfig()),
+            config=DreamlandConfig(),
+            agent=AgentRuntime(DreamlandConfig()),
             sessions=SessionManager(store=ConversationStore(store_dir=tmp_path / "conversations")),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
             worker_state_store=worker_state_store,
@@ -122,8 +122,8 @@ class TestGatewayWorkerStatePersistence:
     def test_saving_worker_state_writes_store(self, tmp_path):
         worker_state_store = WorkerStateStore(path=tmp_path / "worker_state.json")
         gateway = GatewayServer(
-            config=TowelConfig(),
-            agent=AgentRuntime(TowelConfig()),
+            config=DreamlandConfig(),
+            agent=AgentRuntime(DreamlandConfig()),
             sessions=SessionManager(store=ConversationStore(store_dir=tmp_path / "conversations")),
             pin_store=SessionPinStore(path=tmp_path / "pins.json"),
             worker_state_store=worker_state_store,

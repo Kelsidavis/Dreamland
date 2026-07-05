@@ -1,7 +1,7 @@
 """Tests for incremental context synchronization."""
 
-from towel.agent.conversation import Conversation, Message, Role
-from towel.gateway.context_sync import (
+from dreamland.agent.conversation import Conversation, Message, Role
+from dreamland.gateway.context_sync import (
     ContextSyncManager,
     ConversationDelta,
     apply_delta,

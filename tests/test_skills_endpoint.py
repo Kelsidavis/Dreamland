@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
-from towel.skills.base import Skill, ToolDefinition
-from towel.skills.registry import SkillRegistry
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
+from dreamland.skills.base import Skill, ToolDefinition
+from dreamland.skills.registry import SkillRegistry
 
 
 class _EchoSkill(Skill):
@@ -62,7 +62,7 @@ def _make_gateway(store, registry: SkillRegistry | None = None) -> GatewayServer
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
     return GatewayServer(
-        config=TowelConfig(),
+        config=DreamlandConfig(),
         agent=_FakeAgent(registry or SkillRegistry()),
         sessions=sessions,
         pin_store=pin_store,
@@ -108,7 +108,7 @@ class TestSkillsEndpoint:
         pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
         worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
         gw = GatewayServer(
-            config=TowelConfig(),
+            config=DreamlandConfig(),
             agent=_BareAgent(),
             sessions=sessions,
             pin_store=pin_store,

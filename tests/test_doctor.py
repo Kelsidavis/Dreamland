@@ -1,6 +1,6 @@
-"""Tests for towel doctor diagnostics."""
+"""Tests for dreamland doctor diagnostics."""
 
-from towel.cli.doctor import (
+from dreamland.cli.doctor import (
     Check,
     check_config,
     check_environment,
@@ -12,7 +12,7 @@ from towel.cli.doctor import (
     check_storage,
     run_doctor,
 )
-from towel.config import TowelConfig
+from dreamland.config import DreamlandConfig
 
 
 class TestCheck:
@@ -25,7 +25,7 @@ class TestCheck:
         assert len(c.errors) == 0
 
     def test_doctor_exits_nonzero_on_failure(self):
-        """``towel doctor`` previously always returned exit 0 — a
+        """``dreamland doctor`` previously always returned exit 0 — a
         broken environment looked identical to a clean one from the
         shell's perspective, defeating the point of running it in a
         CI script or pre-commit hook. Now any failed check causes a
@@ -34,7 +34,7 @@ class TestCheck:
 
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         # Inject a synthetic failing check by patching run_doctor.
         c_failing = Check("synthetic-failure")
@@ -44,7 +44,7 @@ class TestCheck:
 
         runner = CliRunner()
         with patch(
-            "towel.cli.doctor.run_doctor",
+            "dreamland.cli.doctor.run_doctor",
             return_value=[c_failing, c_passing],
         ):
             result = runner.invoke(cli, ["doctor"])
@@ -61,7 +61,7 @@ class TestCheck:
 
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         c_warned = Check("with-warning")
         c_warned.ok("mostly fine")
@@ -69,7 +69,7 @@ class TestCheck:
 
         runner = CliRunner()
         with patch(
-            "towel.cli.doctor.run_doctor",
+            "dreamland.cli.doctor.run_doctor",
             return_value=[c_warned],
         ):
             result = runner.invoke(cli, ["doctor"])
@@ -118,13 +118,13 @@ class TestEnvironmentCheck:
 
 class TestConfigCheck:
     def test_default_config_passes(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         c = check_config(config)
         c.finalize()
         assert c.passed
 
     def test_detects_bad_context_window(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         config.model.context_window = 100
         config.model.max_tokens = 200
         c = check_config(config)
@@ -133,7 +133,7 @@ class TestConfigCheck:
         assert any("context_window" in e for e in c.errors)
 
     def test_shows_model_name(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         c = check_config(config)
         assert any(config.model.name in d for d in c.details)
 
@@ -163,7 +163,7 @@ class TestMlxCheck:
 
 class TestSkillsCheck:
     def test_builtins_load(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         c = check_skills(config)
         c.finalize()
         assert c.passed
@@ -174,7 +174,7 @@ class TestSkillsCheck:
 
 class TestGatewayCheck:
     def test_gateway_not_running(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         # Use a port that's definitely not in use
         config.gateway.port = 19999
         c = check_gateway(config)
@@ -183,7 +183,7 @@ class TestGatewayCheck:
         assert any("not running" in d for d in c.details)
 
     def test_reports_port_availability(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         config.gateway.port = 19998
         c = check_gateway(config)
         c.finalize()
@@ -193,14 +193,14 @@ class TestGatewayCheck:
         """The /health response carries `workers.stuck` — busy workers
         wedged ≥5min on a request that won't return. The fleet panel
         renders this with a red border, but operators running
-        `towel doctor` from the CLI had no equivalent signal until
+        `dreamland doctor` from the CLI had no equivalent signal until
         now. Translate the count into an actionable warn + suggestion
         so doctor matches the panel's visibility."""
         from unittest.mock import MagicMock, patch
 
-        from towel.cli.doctor import check_gateway
+        from dreamland.cli.doctor import check_gateway
 
-        config = TowelConfig()
+        config = DreamlandConfig()
 
         resp = MagicMock()
         resp.json.return_value = {
@@ -229,9 +229,9 @@ class TestGatewayCheck:
         signal loses meaning."""
         from unittest.mock import MagicMock, patch
 
-        from towel.cli.doctor import check_gateway
+        from dreamland.cli.doctor import check_gateway
 
-        config = TowelConfig()
+        config = DreamlandConfig()
 
         resp = MagicMock()
         resp.json.return_value = {
@@ -261,7 +261,7 @@ class TestStorageCheck:
 class TestPersistedWorkerStateCheck:
     def test_clean_slate_when_file_absent(self, tmp_path, monkeypatch):
         # Point the default store at an empty tmp dir.
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
 
         monkeypatch.setattr(
             worker_state, "DEFAULT_WORKER_STATE_PATH", tmp_path / "absent.json"
@@ -274,7 +274,7 @@ class TestPersistedWorkerStateCheck:
     def test_reports_disabled_draining_and_overrides(self, tmp_path, monkeypatch):
         import json
 
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
 
         state_path = tmp_path / "worker_state.json"
         state_path.write_text(
@@ -308,7 +308,7 @@ class TestPersistedWorkerStateCheck:
 
 class TestMemoryStoreCheck:
     def test_no_memory_file_is_ok(self, tmp_path, monkeypatch):
-        from towel.memory import store as memory_store
+        from dreamland.memory import store as memory_store
 
         monkeypatch.setattr(memory_store, "DEFAULT_MEMORY_DIR", tmp_path / "memory")
         c = check_memory_store()
@@ -320,7 +320,7 @@ class TestMemoryStoreCheck:
         assert "No memories stored yet" in joined or "Memory store:" in joined
 
     def test_migration_archive_is_surfaced(self, tmp_path, monkeypatch):
-        from towel.memory import store as memory_store
+        from dreamland.memory import store as memory_store
 
         mem_dir = tmp_path / "memory"
         mem_dir.mkdir()
@@ -338,7 +338,7 @@ class TestMemoryStoreCheck:
 
 class TestRunDoctor:
     def test_run_all_checks(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         config.gateway.port = 19997  # avoid conflicts
         checks = run_doctor(config)
         assert len(checks) == 13
@@ -357,7 +357,7 @@ class TestRunDoctor:
         assert "Memory store" in names
 
     def test_all_checks_finalized(self):
-        checks = run_doctor(TowelConfig())
+        checks = run_doctor(DreamlandConfig())
         for c in checks:
             # Each check should have been finalized (passed is set)
             assert isinstance(c.passed, bool)
@@ -367,7 +367,7 @@ class TestOrchestrationsCheck:
     def test_orchestrations_check_runs(self):
         """Smoke: the check reads whatever history exists (possibly
         none) without raising, like the other store-backed checks."""
-        from towel.cli.doctor import check_orchestrations
+        from dreamland.cli.doctor import check_orchestrations
 
         c = check_orchestrations()
         c.finalize()
@@ -375,8 +375,8 @@ class TestOrchestrationsCheck:
         assert not c.errors
 
     def test_orchestrations_check_reads_records(self, tmp_path, monkeypatch):
-        from towel.cli import doctor as doctor_mod
-        from towel.persistence.orchestrations import OrchestrationStore
+        from dreamland.cli import doctor as doctor_mod
+        from dreamland.persistence.orchestrations import OrchestrationStore
 
         store = OrchestrationStore(path=tmp_path / "orch.json")
         store.save({
@@ -387,7 +387,7 @@ class TestOrchestrationsCheck:
                      "created_at": "2026-07-02T00:00:00+00:00"},
         })
         monkeypatch.setattr(
-            "towel.persistence.orchestrations.DEFAULT_ORCHESTRATIONS_PATH",
+            "dreamland.persistence.orchestrations.DEFAULT_ORCHESTRATIONS_PATH",
             tmp_path / "orch.json",
         )
         c = doctor_mod.check_orchestrations()

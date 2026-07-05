@@ -1,11 +1,11 @@
 """Tests for session worker pin persistence."""
 
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
 
 
 class TestSessionPinStore:
@@ -87,8 +87,8 @@ class TestGatewayPinPersistence:
         pin_store.save({"chat-1": "desktop-1"})
 
         gateway = GatewayServer(
-            config=TowelConfig(),
-            agent=AgentRuntime(TowelConfig()),
+            config=DreamlandConfig(),
+            agent=AgentRuntime(DreamlandConfig()),
             sessions=SessionManager(store=ConversationStore(store_dir=tmp_path / "conversations")),
             pin_store=pin_store,
         )
@@ -98,8 +98,8 @@ class TestGatewayPinPersistence:
     def test_pin_and_unpin_write_store(self, tmp_path):
         pin_store = SessionPinStore(path=tmp_path / "pins.json")
         gateway = GatewayServer(
-            config=TowelConfig(),
-            agent=AgentRuntime(TowelConfig()),
+            config=DreamlandConfig(),
+            agent=AgentRuntime(DreamlandConfig()),
             sessions=SessionManager(store=ConversationStore(store_dir=tmp_path / "conversations")),
             pin_store=pin_store,
         )

@@ -1,7 +1,14 @@
-"""
-Towel — Don't Panic.
+"""Legacy import shim: `towel` was renamed to `dreamland`.
 
-Your local-first AI assistant.
+User-authored skills and scripts written as `from towel.skills.base
+import Skill` keep working — this package aliases itself to the
+dreamland package, and Python's import machinery resolves submodules
+(`towel.skills.base` → `dreamland/skills/base.py`) through the aliased
+module's __path__.
 """
 
-__version__ = "2.3.0"
+import sys
+
+import dreamland
+
+sys.modules[__name__] = dreamland

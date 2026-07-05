@@ -1,8 +1,8 @@
-"""Tests for the `towel workers` CLI command."""
+"""Tests for the `dreamland workers` CLI command."""
 
 from click.testing import CliRunner
 
-from towel.cli.main import cli
+from dreamland.cli.main import cli
 
 
 class _Resp:
@@ -72,7 +72,7 @@ class TestWorkersCommand:
         health_payload = {
             "status": "hoopy",
             "version": "0.1.0",
-            "motto": "Don't Panic.",
+            "motto": "It doesn't exist.",
             "connections": 1,
             "sessions": 2,
             "workers": {

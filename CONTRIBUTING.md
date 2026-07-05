@@ -1,12 +1,12 @@
-# Contributing to Towel
+# Contributing to Dreamland
 
 Don't Panic. Contributions are welcome.
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/Kelsidavis/Towel.git
-cd Towel
+git clone https://github.com/Kelsidavis/Dreamland.git
+cd Dreamland
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -30,10 +30,10 @@ ruff check src/ tests/
 ## Adding a Skill
 
 ```bash
-towel skill-init my_skill    # generates ~/.towel/skills/my_skill_skill.py
+dreamland skill-init my_skill    # generates ~/.dreamland/skills/my_skill_skill.py
 ```
 
-Edit the generated file, restart Towel, and your skill is loaded.
+Edit the generated file, restart Dreamland, and your skill is loaded.
 
 ## Pull Requests
 

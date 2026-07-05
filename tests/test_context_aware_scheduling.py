@@ -2,8 +2,8 @@
 
 import json
 
-from towel.gateway.workers import WorkerRegistry
-from towel.nodes.tracker import NodeTracker
+from dreamland.gateway.workers import WorkerRegistry
+from dreamland.nodes.tracker import NodeTracker
 
 
 class DummyWS:

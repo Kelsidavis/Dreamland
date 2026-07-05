@@ -2,10 +2,10 @@
 
 import pytest
 
-from towel.skills.builtin import register_builtins
-from towel.skills.builtin.filesystem import FileSystemSkill
-from towel.skills.builtin.shell import ShellSkill
-from towel.skills.registry import SkillRegistry
+from dreamland.skills.builtin import register_builtins
+from dreamland.skills.builtin.filesystem import FileSystemSkill
+from dreamland.skills.builtin.shell import ShellSkill
+from dreamland.skills.registry import SkillRegistry
 
 
 @pytest.fixture
@@ -27,9 +27,9 @@ class TestFileSystemSkill:
     @pytest.mark.asyncio
     async def test_read_file(self, fs_skill, tmp_path):
         f = tmp_path / "test.txt"
-        f.write_text("hello towel")
+        f.write_text("hello dreamland")
         result = await fs_skill.execute("read_file", {"path": str(f)})
-        assert result == "hello towel"
+        assert result == "hello dreamland"
 
     @pytest.mark.asyncio
     async def test_read_missing_file(self, fs_skill):
@@ -153,7 +153,7 @@ class TestShellSkill:
 class TestSystemSkill:
     @pytest.fixture
     def sys_skill(self):
-        from towel.skills.builtin.system import SystemSkill
+        from dreamland.skills.builtin.system import SystemSkill
 
         return SystemSkill()
 
@@ -182,7 +182,7 @@ class TestSystemSkill:
 class TestTimeSkill:
     @pytest.fixture
     def time_skill(self):
-        from towel.skills.builtin.time_skill import TimeSkill
+        from dreamland.skills.builtin.time_skill import TimeSkill
 
         return TimeSkill()
 
@@ -234,7 +234,7 @@ class TestTimeSkill:
 class TestNetworkSkill:
     @pytest.fixture
     def net_skill(self):
-        from towel.skills.builtin.network import NetworkSkill
+        from dreamland.skills.builtin.network import NetworkSkill
 
         return NetworkSkill()
 
@@ -273,7 +273,7 @@ class TestNetworkSkill:
 class TestHashSkill:
     @pytest.fixture
     def hash_skill(self):
-        from towel.skills.builtin.hash_skill import HashSkill
+        from dreamland.skills.builtin.hash_skill import HashSkill
 
         return HashSkill()
 
@@ -309,11 +309,11 @@ class TestHashSkill:
 
     @pytest.mark.asyncio
     async def test_base64_roundtrip(self, hash_skill):
-        encoded = await hash_skill.execute("base64_encode", {"text": "Don't Panic"})
+        encoded = await hash_skill.execute("base64_encode", {"text": "It doesn't exist"})
         assert "Base64:" in encoded
         b64_val = encoded.split(": ", 1)[1]
         decoded = await hash_skill.execute("base64_decode", {"data": b64_val})
-        assert "Don't Panic" in decoded
+        assert "It doesn't exist" in decoded
 
     @pytest.mark.asyncio
     async def test_url_encode(self, hash_skill):
@@ -329,7 +329,7 @@ class TestHashSkill:
 class TestEnvSkill:
     @pytest.fixture
     def env_skill(self):
-        from towel.skills.builtin.env_skill import EnvSkill
+        from dreamland.skills.builtin.env_skill import EnvSkill
 
         return EnvSkill()
 
@@ -345,7 +345,7 @@ class TestEnvSkill:
 
     @pytest.mark.asyncio
     async def test_env_get_missing(self, env_skill):
-        result = await env_skill.execute("env_get", {"name": "TOWEL_NONEXISTENT_VAR_XYZ"})
+        result = await env_skill.execute("env_get", {"name": "DREAMLAND_NONEXISTENT_VAR_XYZ"})
         assert "not set" in result
 
     @pytest.mark.asyncio
@@ -387,7 +387,7 @@ class TestEnvSkill:
 class TestRegexSkill:
     @pytest.fixture
     def rx(self):
-        from towel.skills.builtin.regex_skill import RegexSkill
+        from dreamland.skills.builtin.regex_skill import RegexSkill
 
         return RegexSkill()
 
@@ -446,7 +446,7 @@ class TestRegexSkill:
 class TestConvertSkill:
     @pytest.fixture
     def conv(self):
-        from towel.skills.builtin.convert_skill import ConvertSkill
+        from dreamland.skills.builtin.convert_skill import ConvertSkill
 
         return ConvertSkill()
 
@@ -524,7 +524,7 @@ class TestRegisterBuiltins:
 class TestDiffSkill:
     @pytest.fixture
     def diff_skill(self):
-        from towel.skills.builtin.diff_skill import DiffSkill
+        from dreamland.skills.builtin.diff_skill import DiffSkill
 
         return DiffSkill()
 
@@ -578,7 +578,7 @@ class TestDiffSkill:
 class TestArchiveSkill:
     @pytest.fixture
     def arc(self):
-        from towel.skills.builtin.archive_skill import ArchiveSkill
+        from dreamland.skills.builtin.archive_skill import ArchiveSkill
 
         return ArchiveSkill()
 
@@ -632,7 +632,7 @@ class TestArchiveSkill:
 class TestCronSkill:
     @pytest.fixture
     def cron(self):
-        from towel.skills.builtin.cron_skill import CronSkill
+        from dreamland.skills.builtin.cron_skill import CronSkill
 
         return CronSkill()
 
@@ -686,7 +686,7 @@ class TestCronSkill:
 class TestMarkdownSkill:
     @pytest.fixture
     def md(self):
-        from towel.skills.builtin.markdown_skill import MarkdownSkill
+        from dreamland.skills.builtin.markdown_skill import MarkdownSkill
 
         return MarkdownSkill()
 
@@ -725,7 +725,7 @@ class TestMarkdownSkill:
 class TestHttpSkill:
     @pytest.fixture
     def http(self):
-        from towel.skills.builtin.http_skill import HttpSkill
+        from dreamland.skills.builtin.http_skill import HttpSkill
 
         return HttpSkill()
 
@@ -764,7 +764,7 @@ class TestHttpSkill:
 
 class TestHeartbeat:
     def test_heartbeat_lifecycle(self):
-        from towel.agent.heartbeat import Heartbeat
+        from dreamland.agent.heartbeat import Heartbeat
 
         hb = Heartbeat(interval=0.1)
         hb.start()
@@ -778,7 +778,7 @@ class TestHeartbeat:
         hb.stop()
 
     def test_heartbeat_errors(self):
-        from towel.agent.heartbeat import Heartbeat
+        from dreamland.agent.heartbeat import Heartbeat
 
         triggered = []
         hb = Heartbeat(
@@ -794,7 +794,7 @@ class TestHeartbeat:
         hb.stop()
 
     def test_heartbeat_error_reset(self):
-        from towel.agent.heartbeat import Heartbeat
+        from dreamland.agent.heartbeat import Heartbeat
 
         hb = Heartbeat(interval=60, max_consecutive_errors=5)
         hb.start()
@@ -810,7 +810,7 @@ class TestHeartbeat:
 class TestSqlSkill:
     @pytest.fixture
     def sql(self):
-        from towel.skills.builtin.sql_skill import SqlSkill
+        from dreamland.skills.builtin.sql_skill import SqlSkill
 
         return SqlSkill()
 
@@ -881,7 +881,7 @@ class TestSqlSkill:
 class TestImageSkill:
     @pytest.fixture
     def img(self):
-        from towel.skills.builtin.image_skill import ImageSkill
+        from dreamland.skills.builtin.image_skill import ImageSkill
 
         return ImageSkill()
 
@@ -916,7 +916,7 @@ class TestImageSkill:
 class TestProcessSkill:
     @pytest.fixture
     def proc(self):
-        from towel.skills.builtin.process_skill import ProcessSkill
+        from dreamland.skills.builtin.process_skill import ProcessSkill
 
         return ProcessSkill()
 
@@ -940,7 +940,7 @@ class TestProcessSkill:
 class TestTextSkill:
     @pytest.fixture
     def txt(self):
-        from towel.skills.builtin.text_skill import TextSkill
+        from dreamland.skills.builtin.text_skill import TextSkill
 
         return TextSkill()
 
@@ -994,8 +994,10 @@ class TestTextSkill:
 class TestKnowledgeSkill:
     @pytest.fixture
     def kb(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.knowledge_skill.KB_FILE", tmp_path / "kb.json")
-        from towel.skills.builtin.knowledge_skill import KnowledgeSkill
+        monkeypatch.setattr(
+            "dreamland.skills.builtin.knowledge_skill.KB_FILE", tmp_path / "kb.json",
+        )
+        from dreamland.skills.builtin.knowledge_skill import KnowledgeSkill
 
         return KnowledgeSkill()
 
@@ -1031,8 +1033,8 @@ class TestKnowledgeSkill:
         kb_path = tmp_path / "kb.json"
         # Wrong top-level shape — a dict instead of a list.
         kb_path.write_text('{"not": "a list"}', encoding="utf-8")
-        monkeypatch.setattr("towel.skills.builtin.knowledge_skill.KB_FILE", kb_path)
-        from towel.skills.builtin.knowledge_skill import KnowledgeSkill, _load_kb
+        monkeypatch.setattr("dreamland.skills.builtin.knowledge_skill.KB_FILE", kb_path)
+        from dreamland.skills.builtin.knowledge_skill import KnowledgeSkill, _load_kb
 
         # _load_kb returns []; the file's bytes are left intact so
         # the operator can inspect what happened.
@@ -1048,7 +1050,7 @@ class TestKnowledgeSkill:
 class TestTranslateSkill:
     @pytest.fixture
     def tr(self):
-        from towel.skills.builtin.translate_skill import TranslateSkill
+        from dreamland.skills.builtin.translate_skill import TranslateSkill
 
         return TranslateSkill()
 
@@ -1071,7 +1073,7 @@ class TestTranslateSkill:
 class TestSecuritySkill:
     @pytest.fixture
     def sec(self):
-        from towel.skills.builtin.security_skill import SecuritySkill
+        from dreamland.skills.builtin.security_skill import SecuritySkill
 
         return SecuritySkill()
 
@@ -1097,8 +1099,10 @@ class TestSecuritySkill:
 class TestTodoSkill:
     @pytest.fixture
     def todo(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.todo_skill.TODO_FILE", tmp_path / "todos.json")
-        from towel.skills.builtin.todo_skill import TodoSkill
+        monkeypatch.setattr(
+            "dreamland.skills.builtin.todo_skill.TODO_FILE", tmp_path / "todos.json",
+        )
+        from dreamland.skills.builtin.todo_skill import TodoSkill
 
         return TodoSkill()
 
@@ -1127,7 +1131,7 @@ class TestTodoSkill:
 class TestTemplateGenSkill:
     @pytest.fixture
     def scaffold(self):
-        from towel.skills.builtin.template_gen_skill import TemplateGenSkill
+        from dreamland.skills.builtin.template_gen_skill import TemplateGenSkill
 
         return TemplateGenSkill()
 
@@ -1162,7 +1166,7 @@ class TestTemplateGenSkill:
 class TestMathSkill:
     @pytest.fixture
     def m(self):
-        from towel.skills.builtin.math_skill import MathSkill
+        from dreamland.skills.builtin.math_skill import MathSkill
 
         return MathSkill()
 
@@ -1196,7 +1200,7 @@ class TestMathSkill:
 class TestDockerSkill:
     @pytest.fixture
     def dock(self):
-        from towel.skills.builtin.docker_skill import DockerSkill
+        from dreamland.skills.builtin.docker_skill import DockerSkill
 
         return DockerSkill()
 
@@ -1220,7 +1224,7 @@ class TestDockerSkill:
 class TestCalendarSkill:
     @pytest.fixture
     def cal(self):
-        from towel.skills.builtin.calendar_skill import CalendarSkill
+        from dreamland.skills.builtin.calendar_skill import CalendarSkill
 
         return CalendarSkill()
 
@@ -1256,7 +1260,7 @@ class TestCalendarSkill:
 class TestQrSkill:
     @pytest.fixture
     def qr(self):
-        from towel.skills.builtin.qr_skill import QrSkill
+        from dreamland.skills.builtin.qr_skill import QrSkill
 
         return QrSkill()
 
@@ -1266,15 +1270,15 @@ class TestQrSkill:
 
     @pytest.mark.asyncio
     async def test_generate(self, qr):
-        result = await qr.execute("qr_generate", {"data": "https://towel.dev"})
+        result = await qr.execute("qr_generate", {"data": "https://dreamland.dev"})
         assert "█" in result or "▀" in result
-        assert "towel.dev" in result
+        assert "dreamland.dev" in result
 
 
 class TestJwtSkill:
     @pytest.fixture
     def jwt(self):
-        from towel.skills.builtin.jwt_skill import JwtSkill
+        from dreamland.skills.builtin.jwt_skill import JwtSkill
 
         return JwtSkill()
 
@@ -1300,7 +1304,7 @@ class TestJwtSkill:
 class TestColorSkill:
     @pytest.fixture
     def col(self):
-        from towel.skills.builtin.color_skill import ColorSkill
+        from dreamland.skills.builtin.color_skill import ColorSkill
 
         return ColorSkill()
 
@@ -1331,7 +1335,7 @@ class TestColorSkill:
 class TestUuidSkill:
     @pytest.fixture
     def uu(self):
-        from towel.skills.builtin.uuid_skill import UuidSkill
+        from dreamland.skills.builtin.uuid_skill import UuidSkill
 
         return UuidSkill()
 
@@ -1359,7 +1363,7 @@ class TestUuidSkill:
 class TestYamlSkill:
     @pytest.fixture
     def ym(self):
-        from towel.skills.builtin.yaml_skill import YamlSkill
+        from dreamland.skills.builtin.yaml_skill import YamlSkill
 
         return YamlSkill()
 
@@ -1405,7 +1409,7 @@ class TestYamlSkill:
 class TestSnippetGenSkill:
     @pytest.fixture
     def cg(self):
-        from towel.skills.builtin.snippet_gen_skill import SnippetGenSkill
+        from dreamland.skills.builtin.snippet_gen_skill import SnippetGenSkill
 
         return SnippetGenSkill()
 
@@ -1451,7 +1455,7 @@ class TestSnippetGenSkill:
 class TestCsvToolsSkill:
     @pytest.fixture
     def cs(self):
-        from towel.skills.builtin.csv_skill import CsvSkill
+        from dreamland.skills.builtin.csv_skill import CsvSkill
 
         return CsvSkill()
 
@@ -1499,7 +1503,7 @@ class TestCsvToolsSkill:
 class TestSemverSkill:
     @pytest.fixture
     def sv(self):
-        from towel.skills.builtin.semver_skill import SemverSkill
+        from dreamland.skills.builtin.semver_skill import SemverSkill
 
         return SemverSkill()
 
@@ -1529,7 +1533,7 @@ class TestSemverSkill:
 class TestIpCalcSkill:
     @pytest.fixture
     def ip(self):
-        from towel.skills.builtin.ip_calc_skill import IpCalcSkill
+        from dreamland.skills.builtin.ip_calc_skill import IpCalcSkill
 
         return IpCalcSkill()
 
@@ -1563,7 +1567,7 @@ class TestIpCalcSkill:
 class TestDotenvSkill:
     @pytest.fixture
     def de(self):
-        from towel.skills.builtin.dotenv_skill import DotenvSkill
+        from dreamland.skills.builtin.dotenv_skill import DotenvSkill
 
         return DotenvSkill()
 
@@ -1599,7 +1603,7 @@ class TestDotenvSkill:
 class TestLogAnalyzerSkill:
     @pytest.fixture
     def la(self):
-        from towel.skills.builtin.log_analyzer_skill import LogAnalyzerSkill
+        from dreamland.skills.builtin.log_analyzer_skill import LogAnalyzerSkill
 
         return LogAnalyzerSkill()
 
@@ -1644,7 +1648,7 @@ class TestLogAnalyzerSkill:
 class TestHttpHeaderSkill:
     @pytest.fixture
     def hh(self):
-        from towel.skills.builtin.http_header_skill import HttpHeaderSkill
+        from dreamland.skills.builtin.http_header_skill import HttpHeaderSkill
 
         return HttpHeaderSkill()
 
@@ -1675,7 +1679,7 @@ class TestHttpHeaderSkill:
 class TestAsciiSkill:
     @pytest.fixture
     def asc(self):
-        from towel.skills.builtin.ascii_skill import AsciiSkill
+        from dreamland.skills.builtin.ascii_skill import AsciiSkill
 
         return AsciiSkill()
 
@@ -1702,7 +1706,7 @@ class TestAsciiSkill:
 class TestStringSkill:
     @pytest.fixture
     def ss(self):
-        from towel.skills.builtin.string_skill import StringSkill
+        from dreamland.skills.builtin.string_skill import StringSkill
 
         return StringSkill()
 
@@ -1734,7 +1738,7 @@ class TestStringSkill:
 class TestSshSkill:
     @pytest.fixture
     def ssh(self):
-        from towel.skills.builtin.ssh_skill import SshSkill
+        from dreamland.skills.builtin.ssh_skill import SshSkill
 
         return SshSkill()
 
@@ -1750,7 +1754,7 @@ class TestSshSkill:
 class TestNpmSkill:
     @pytest.fixture
     def npm(self):
-        from towel.skills.builtin.npm_skill import NpmSkill
+        from dreamland.skills.builtin.npm_skill import NpmSkill
 
         return NpmSkill()
 
@@ -1782,7 +1786,7 @@ class TestNpmSkill:
 class TestPipSkill:
     @pytest.fixture
     def pip(self):
-        from towel.skills.builtin.pip_skill import PipSkill
+        from dreamland.skills.builtin.pip_skill import PipSkill
 
         return PipSkill()
 
@@ -1804,7 +1808,7 @@ class TestPipSkill:
 class TestMetricsSkill:
     @pytest.fixture(autouse=True)
     def reset(self):
-        from towel.skills.builtin.metrics_skill import _counters, _gauges, _timers
+        from dreamland.skills.builtin.metrics_skill import _counters, _gauges, _timers
 
         _counters.clear()
         _gauges.clear()
@@ -1812,7 +1816,7 @@ class TestMetricsSkill:
 
     @pytest.fixture
     def met(self):
-        from towel.skills.builtin.metrics_skill import MetricsSkill
+        from dreamland.skills.builtin.metrics_skill import MetricsSkill
 
         return MetricsSkill()
 
@@ -1847,7 +1851,7 @@ class TestMetricsSkill:
 class TestPdfSkill:
     @pytest.fixture
     def pdf(self):
-        from towel.skills.builtin.pdf_skill import PdfSkill
+        from dreamland.skills.builtin.pdf_skill import PdfSkill
 
         return PdfSkill()
 
@@ -1868,7 +1872,7 @@ class TestPdfSkill:
 class TestPlaceholderSkill:
     @pytest.fixture
     def ph(self):
-        from towel.skills.builtin.placeholder_skill import PlaceholderSkill
+        from dreamland.skills.builtin.placeholder_skill import PlaceholderSkill
 
         return PlaceholderSkill()
 
@@ -1907,7 +1911,7 @@ class TestPlaceholderSkill:
 class TestGitignoreSkill:
     @pytest.fixture
     def gi(self):
-        from towel.skills.builtin.gitignore_skill import GitignoreSkill
+        from dreamland.skills.builtin.gitignore_skill import GitignoreSkill
 
         return GitignoreSkill()
 
@@ -1936,7 +1940,7 @@ class TestGitignoreSkill:
 class TestLintSkill:
     @pytest.fixture
     def lint(self):
-        from towel.skills.builtin.lint_skill import LintSkill
+        from dreamland.skills.builtin.lint_skill import LintSkill
 
         return LintSkill()
 
@@ -1970,7 +1974,7 @@ class TestLintSkill:
 class TestWebhookTriggerSkill:
     @pytest.fixture
     def wh(self):
-        from towel.skills.builtin.webhook_trigger_skill import WebhookTriggerSkill
+        from dreamland.skills.builtin.webhook_trigger_skill import WebhookTriggerSkill
 
         return WebhookTriggerSkill()
 
@@ -1982,7 +1986,7 @@ class TestWebhookTriggerSkill:
 class TestDiagramSkill:
     @pytest.fixture
     def dia(self):
-        from towel.skills.builtin.diagram_skill import DiagramSkill
+        from dreamland.skills.builtin.diagram_skill import DiagramSkill
 
         return DiagramSkill()
 
@@ -2032,7 +2036,7 @@ class TestDiagramSkill:
 class TestChangelogGenSkill:
     @pytest.fixture
     def clog(self):
-        from towel.skills.builtin.changelog_gen_skill import ChangelogGenSkill
+        from dreamland.skills.builtin.changelog_gen_skill import ChangelogGenSkill
 
         return ChangelogGenSkill()
 
@@ -2044,13 +2048,13 @@ class TestChangelogGenSkill:
 class TestNoteSkill:
     @pytest.fixture(autouse=True)
     def reset(self):
-        from towel.skills.builtin.note_skill import _notes
+        from dreamland.skills.builtin.note_skill import _notes
 
         _notes.clear()
 
     @pytest.fixture
     def note(self):
-        from towel.skills.builtin.note_skill import NoteSkill
+        from dreamland.skills.builtin.note_skill import NoteSkill
 
         return NoteSkill()
 
@@ -2078,7 +2082,7 @@ class TestNoteSkill:
 
 class TestHooks:
     def test_hook_registry(self):
-        from towel.agent.hooks import HookRegistry
+        from dreamland.agent.hooks import HookRegistry
 
         reg = HookRegistry()
         called = []
@@ -2092,7 +2096,7 @@ class TestHooks:
 
     @pytest.mark.asyncio
     async def test_hook_emit(self):
-        from towel.agent.hooks import HookRegistry
+        from dreamland.agent.hooks import HookRegistry
 
         reg = HookRegistry()
         results = []
@@ -2107,7 +2111,7 @@ class TestHooks:
 
     @pytest.mark.asyncio
     async def test_hook_off(self):
-        from towel.agent.hooks import HookRegistry
+        from dreamland.agent.hooks import HookRegistry
 
         reg = HookRegistry()
 
@@ -2123,8 +2127,8 @@ class TestHooks:
 class TestBookmarkSkill:
     @pytest.fixture
     def bm(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.bookmark_skill.BM_FILE", tmp_path / "bm.json")
-        from towel.skills.builtin.bookmark_skill import BookmarkSkill
+        monkeypatch.setattr("dreamland.skills.builtin.bookmark_skill.BM_FILE", tmp_path / "bm.json")
+        from dreamland.skills.builtin.bookmark_skill import BookmarkSkill
 
         return BookmarkSkill()
 
@@ -2154,7 +2158,7 @@ class TestBookmarkSkill:
 class TestCrontabSkill:
     @pytest.fixture
     def ct(self):
-        from towel.skills.builtin.crontab_skill import CrontabSkill
+        from dreamland.skills.builtin.crontab_skill import CrontabSkill
 
         return CrontabSkill()
 
@@ -2166,7 +2170,7 @@ class TestCrontabSkill:
 class TestOpenApiSkill:
     @pytest.fixture
     def oa(self):
-        from towel.skills.builtin.openapi_skill import OpenApiSkill
+        from dreamland.skills.builtin.openapi_skill import OpenApiSkill
 
         return OpenApiSkill()
 
@@ -2214,7 +2218,7 @@ class TestOpenApiSkill:
 class TestKeychainSkill:
     @pytest.fixture
     def kc(self):
-        from towel.skills.builtin.keychain_skill import KeychainSkill
+        from dreamland.skills.builtin.keychain_skill import KeychainSkill
 
         return KeychainSkill()
 
@@ -2226,7 +2230,7 @@ class TestKeychainSkill:
 class TestTypoSkill:
     @pytest.fixture
     def typo(self):
-        from towel.skills.builtin.typo_skill import TypoSkill
+        from dreamland.skills.builtin.typo_skill import TypoSkill
 
         return TypoSkill()
 
@@ -2268,7 +2272,7 @@ class TestTypoSkill:
 class TestMakeSkill:
     @pytest.fixture
     def mk(self):
-        from towel.skills.builtin.make_skill import MakeSkill
+        from dreamland.skills.builtin.make_skill import MakeSkill
 
         return MakeSkill()
 
@@ -2314,7 +2318,7 @@ class TestMakeSkill:
 class TestManSkill:
     @pytest.fixture
     def man(self):
-        from towel.skills.builtin.man_skill import ManSkill
+        from dreamland.skills.builtin.man_skill import ManSkill
 
         return ManSkill()
 
@@ -2335,35 +2339,35 @@ class TestManSkill:
 
 class TestWeatherSkill:
     def test_tools(self):
-        from towel.skills.builtin.weather_skill import WeatherSkill
+        from dreamland.skills.builtin.weather_skill import WeatherSkill
 
         assert {t.name for t in WeatherSkill().tools()} == {"weather_now", "weather_forecast"}
 
 
 class TestWikipediaSkill:
     def test_tools(self):
-        from towel.skills.builtin.wikipedia_skill import WikipediaSkill
+        from dreamland.skills.builtin.wikipedia_skill import WikipediaSkill
 
         assert {t.name for t in WikipediaSkill().tools()} == {"wiki_search", "wiki_summary"}
 
 
 class TestHackerNewsSkill2:
     def test_tools(self):
-        from towel.skills.builtin.hackernews_skill import HackerNewsSkill
+        from dreamland.skills.builtin.hackernews_skill import HackerNewsSkill
 
         assert {t.name for t in HackerNewsSkill().tools()} == {"hn_top"}
 
 
 class TestCurrencySkill:
     def test_tools(self):
-        from towel.skills.builtin.currency_skill import CurrencySkill
+        from dreamland.skills.builtin.currency_skill import CurrencySkill
 
         assert {t.name for t in CurrencySkill().tools()} == {"currency_convert", "currency_rates"}
 
 
 class TestGithubSkill:
     def test_tools(self):
-        from towel.skills.builtin.github_skill import GithubSkill
+        from dreamland.skills.builtin.github_skill import GithubSkill
 
         names = {t.name for t in GithubSkill().tools()}
         assert "github_repo" in names
@@ -2373,21 +2377,21 @@ class TestGithubSkill:
 
 class TestRedditSkill:
     def test_tools(self):
-        from towel.skills.builtin.reddit_skill import RedditSkill
+        from dreamland.skills.builtin.reddit_skill import RedditSkill
 
         assert {t.name for t in RedditSkill().tools()} == {"reddit_hot", "reddit_search"}
 
 
 class TestStackOverflowSkill2:
     def test_tools(self):
-        from towel.skills.builtin.stackoverflow_skill import StackOverflowSkill
+        from dreamland.skills.builtin.stackoverflow_skill import StackOverflowSkill
 
         assert {t.name for t in StackOverflowSkill().tools()} == {"so_search"}
 
 
 class TestPypiSkill:
     def test_tools(self):
-        from towel.skills.builtin.pypi_skill import PypiSkill
+        from dreamland.skills.builtin.pypi_skill import PypiSkill
 
         assert {t.name for t in PypiSkill().tools()} == {"pypi_info", "pypi_search"}
 
@@ -2395,7 +2399,7 @@ class TestPypiSkill:
 class TestDnsSkill:
     @pytest.mark.asyncio
     async def test_resolve_localhost(self):
-        from towel.skills.builtin.dns_skill import DnsSkill
+        from dreamland.skills.builtin.dns_skill import DnsSkill
 
         result = await DnsSkill().execute("dns_resolve", {"domain": "localhost"})
         assert "127.0.0.1" in result or "::1" in result
@@ -2403,21 +2407,21 @@ class TestDnsSkill:
 
 class TestWhoisSkill2:
     def test_tools(self):
-        from towel.skills.builtin.whois_skill import WhoisSkill
+        from dreamland.skills.builtin.whois_skill import WhoisSkill
 
         assert {t.name for t in WhoisSkill().tools()} == {"whois_lookup"}
 
 
 class TestCertSkill:
     def test_tools(self):
-        from towel.skills.builtin.cert_skill import CertSkill
+        from dreamland.skills.builtin.cert_skill import CertSkill
 
         assert {t.name for t in CertSkill().tools()} == {"cert_check"}
 
 
 class TestUptimeSkill:
     def test_tools(self):
-        from towel.skills.builtin.uptime_skill import UptimeSkill
+        from dreamland.skills.builtin.uptime_skill import UptimeSkill
 
         assert {t.name for t in UptimeSkill().tools()} == {
             "uptime_check",
@@ -2429,7 +2433,7 @@ class TestUptimeSkill:
 class TestRandomSkill:
     @pytest.fixture
     def rnd(self):
-        from towel.skills.builtin.random_skill import RandomSkill
+        from dreamland.skills.builtin.random_skill import RandomSkill
 
         return RandomSkill()
 
@@ -2453,13 +2457,13 @@ class TestRandomSkill:
 class TestPomodoroSkill:
     @pytest.fixture(autouse=True)
     def reset(self):
-        from towel.skills.builtin.pomodoro_skill import _active
+        from dreamland.skills.builtin.pomodoro_skill import _active
 
         _active.clear()
 
     @pytest.mark.asyncio
     async def test_start_and_status(self):
-        from towel.skills.builtin.pomodoro_skill import PomodoroSkill
+        from dreamland.skills.builtin.pomodoro_skill import PomodoroSkill
 
         p = PomodoroSkill()
         result = await p.execute("pomo_start", {"minutes": 25, "task": "Code"})
@@ -2471,7 +2475,7 @@ class TestPomodoroSkill:
 class TestUrlSkill:
     @pytest.mark.asyncio
     async def test_parse(self):
-        from towel.skills.builtin.url_skill import UrlSkill
+        from dreamland.skills.builtin.url_skill import UrlSkill
 
         result = await UrlSkill().execute(
             "url_parse", {"url": "https://example.com:8080/path?q=1#frag"}
@@ -2484,7 +2488,7 @@ class TestUrlSkill:
 class TestEmojiSkill:
     @pytest.mark.asyncio
     async def test_search(self):
-        from towel.skills.builtin.emoji_skill import EmojiSkill
+        from dreamland.skills.builtin.emoji_skill import EmojiSkill
 
         result = await EmojiSkill().execute("emoji_search", {"query": "fire"})
         assert "🔥" in result
@@ -2492,7 +2496,7 @@ class TestEmojiSkill:
 
 class TestCountrySkill2:
     def test_tools(self):
-        from towel.skills.builtin.country_skill import CountrySkill
+        from dreamland.skills.builtin.country_skill import CountrySkill
 
         assert {t.name for t in CountrySkill().tools()} == {"country_info"}
 
@@ -2500,7 +2504,7 @@ class TestCountrySkill2:
 class TestBaseConvertSkill:
     @pytest.mark.asyncio
     async def test_all_bases(self):
-        from towel.skills.builtin.base_convert_skill import BaseConvertSkill
+        from dreamland.skills.builtin.base_convert_skill import BaseConvertSkill
 
         result = await BaseConvertSkill().execute("show_all_bases", {"number": "255"})
         assert "0xff" in result
@@ -2511,7 +2515,7 @@ class TestBaseConvertSkill:
 class TestXmlSkill:
     @pytest.mark.asyncio
     async def test_to_json(self):
-        from towel.skills.builtin.xml_skill import XmlSkill
+        from dreamland.skills.builtin.xml_skill import XmlSkill
 
         result = await XmlSkill().execute("xml_to_json", {"xml": "<root><name>Alice</name></root>"})
         assert "Alice" in result
@@ -2519,7 +2523,7 @@ class TestXmlSkill:
 
 class TestRssSkill:
     def test_tools(self):
-        from towel.skills.builtin.rss_skill import RssSkill
+        from dreamland.skills.builtin.rss_skill import RssSkill
 
         assert {t.name for t in RssSkill().tools()} == {"rss_read"}
 
@@ -2527,7 +2531,7 @@ class TestRssSkill:
 class TestTimezoneSkill:
     @pytest.mark.asyncio
     async def test_convert(self):
-        from towel.skills.builtin.tz_skill import TimezoneSkill
+        from dreamland.skills.builtin.tz_skill import TimezoneSkill
 
         result = await TimezoneSkill().execute(
             "tz_convert", {"time": "09:00", "from_tz": "PST", "to_tz": "EST"}
@@ -2537,7 +2541,7 @@ class TestTimezoneSkill:
 
 class TestPortScannerSkill:
     def test_tools(self):
-        from towel.skills.builtin.port_scanner_skill import PortScannerSkill
+        from dreamland.skills.builtin.port_scanner_skill import PortScannerSkill
 
         assert {t.name for t in PortScannerSkill().tools()} == {"scan_ports"}
 
@@ -2545,7 +2549,7 @@ class TestPortScannerSkill:
 class TestQuoteSkill:
     @pytest.mark.asyncio
     async def test_random(self):
-        from towel.skills.builtin.quote_skill import QuoteSkill
+        from dreamland.skills.builtin.quote_skill import QuoteSkill
 
         result = await QuoteSkill().execute("random_quote", {})
         assert "—" in result
@@ -2554,7 +2558,7 @@ class TestQuoteSkill:
 class TestMimeSkill:
     @pytest.mark.asyncio
     async def test_json(self):
-        from towel.skills.builtin.mime_skill import MimeSkill
+        from dreamland.skills.builtin.mime_skill import MimeSkill
 
         result = await MimeSkill().execute("mime_type", {"path": ".json"})
         assert "application/json" in result
@@ -2562,7 +2566,7 @@ class TestMimeSkill:
 
 class TestCheatSkill:
     def test_tools(self):
-        from towel.skills.builtin.cheat_skill import CheatSkill
+        from dreamland.skills.builtin.cheat_skill import CheatSkill
 
         assert {t.name for t in CheatSkill().tools()} == {"cheat_sheet"}
 
@@ -2570,7 +2574,7 @@ class TestCheatSkill:
 class TestCodexSkill:
     @pytest.fixture
     def codex(self):
-        from towel.skills.builtin.codex_skill import CodexSkill
+        from dreamland.skills.builtin.codex_skill import CodexSkill
 
         return CodexSkill()
 
@@ -2579,21 +2583,21 @@ class TestCodexSkill:
 
     @pytest.mark.asyncio
     async def test_missing_codex_cli(self, codex, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._codex_available", lambda: False)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._codex_available", lambda: False)
         result = await codex.execute("codex_compact", {"text": "hello"})
         assert "Codex CLI not found" in result
 
     @pytest.mark.asyncio
     async def test_not_logged_in(self, codex, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._codex_available", lambda: True)
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._codex_logged_in", lambda: False)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._codex_available", lambda: True)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._codex_logged_in", lambda: False)
         result = await codex.execute("codex_compact", {"text": "hello"})
         assert "Codex is not logged in" in result
 
     @pytest.mark.asyncio
     async def test_compact_success(self, codex, monkeypatch):
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._codex_available", lambda: True)
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._codex_logged_in", lambda: True)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._codex_available", lambda: True)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._codex_logged_in", lambda: True)
 
         def fake_run(prompt: str, model: str) -> str:
             assert "long history" in prompt
@@ -2601,7 +2605,7 @@ class TestCodexSkill:
             assert model
             return "Compacted summary here"
 
-        monkeypatch.setattr("towel.skills.builtin.codex_skill._run_codex_exec", fake_run)
+        monkeypatch.setattr("dreamland.skills.builtin.codex_skill._run_codex_exec", fake_run)
         result = await codex.execute(
             "codex_compact",
             {"text": "long history", "max_words": 120},

@@ -1,7 +1,7 @@
 """Tests for the MLX runtime helpers and prompt rules."""
 
-from towel.agent.conversation import Conversation, Role
-from towel.agent.runtime import (
+from dreamland.agent.conversation import Conversation, Role
+from dreamland.agent.runtime import (
     EMPTY_TEXT_FALLBACK,
     AgentRuntime,
     GenerationResult,
@@ -9,9 +9,9 @@ from towel.agent.runtime import (
     mlx_tokenizer_config,
     tool_result_is_error,
 )
-from towel.config import TowelConfig
-from towel.skills.base import Skill, ToolDefinition
-from towel.skills.registry import SkillRegistry
+from dreamland.config import DreamlandConfig
+from dreamland.skills.base import Skill, ToolDefinition
+from dreamland.skills.registry import SkillRegistry
 
 
 class TestMlxTokenizerConfig:
@@ -31,7 +31,7 @@ class TestToolFeedback:
         assert not tool_result_is_error("Written 12 bytes to /tmp/test.txt")
 
     def test_classifies_canonical_skill_error_format(self):
-        """41 places across src/towel/skills/ return errors as
+        """41 places across src/dreamland/skills/ return errors as
         f"Error: {e}", f"Error reading X: ...", f"Error creating
         X: ...", etc. The old patterns only caught
         "Error executing" / "Error calling" — every other skill
@@ -95,7 +95,7 @@ class TestToolFeedback:
 
 class TestSystemPrompt:
     def test_system_prompt_requires_reporting_results_back(self):
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         runtime = AgentRuntime(config)
 
         system = runtime._build_system_content()
@@ -125,7 +125,7 @@ class TestSystemPrompt:
             async def execute(self, tool_name: str, arguments: dict):
                 return "ok"
 
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         skills = SkillRegistry()
         skills.register(DummySkill())
         runtime = AgentRuntime(config, skills=skills)
@@ -136,23 +136,23 @@ class TestSystemPrompt:
         assert "one corrected retry" in system
 
     def test_auto_context_uses_minimum_for_short_turn(self, monkeypatch):
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         config.model.context_window = 262144
         config.model.min_context_window = 32768
         config.model.auto_context = True
         runtime = AgentRuntime(config)
-        conv = __import__("towel.agent.conversation", fromlist=["Conversation"]).Conversation()
-        conv.add(__import__("towel.agent.conversation", fromlist=["Role"]).Role.USER, "hi")
+        conv = __import__("dreamland.agent.conversation", fromlist=["Conversation"]).Conversation()
+        conv.add(__import__("dreamland.agent.conversation", fromlist=["Role"]).Role.USER, "hi")
 
         captured = {}
 
         def fake_fit(*, context_window, **kwargs):
             captured["context_window"] = context_window
             return kwargs["messages"], __import__(
-                "towel.agent.context", fromlist=["ContextBudget"]
+                "dreamland.agent.context", fromlist=["ContextBudget"]
             ).ContextBudget(context_window=context_window, max_output_tokens=512)
 
-        monkeypatch.setattr("towel.agent.runtime.fit_messages", fake_fit)
+        monkeypatch.setattr("dreamland.agent.runtime.fit_messages", fake_fit)
         runtime._build_prompt(conv)
 
         assert captured["context_window"] == 32768
@@ -186,7 +186,7 @@ class _ReadFileSkill(Skill):
 
 class TestNativeToolsChannel:
     def _runtime_with_one_tool(self) -> AgentRuntime:
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         skills = SkillRegistry()
         skills.register(_ReadFileSkill())
         return AgentRuntime(config, skills=skills)
@@ -261,7 +261,7 @@ class TestEmptyTextFallback:
     def test_step_replaces_empty_final_text(self):
         import asyncio
 
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         runtime = AgentRuntime(config)
 
         async def fake_generate(_conversation):
@@ -279,7 +279,7 @@ class TestEmptyTextFallback:
     def test_step_streaming_replaces_empty_final_text(self):
         import asyncio
 
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         runtime = AgentRuntime(config)
 
         async def fake_stream(_conversation):
@@ -335,12 +335,12 @@ class TestRenderRequestPrompt:
     on the missing `prompt` field (live regression 2026-07-03)."""
 
     def test_prompt_key_used_verbatim(self):
-        runtime = AgentRuntime(TowelConfig())
+        runtime = AgentRuntime(DreamlandConfig())
         req = {"mode": "mlx_prompt", "prompt": "raw prompt"}
         assert runtime._render_request_prompt(req) == "raw prompt"
 
     def test_messages_rendered_via_chat_template(self):
-        runtime = AgentRuntime(TowelConfig())
+        runtime = AgentRuntime(DreamlandConfig())
 
         class _FakeTokenizer:
             def __init__(self) -> None:
@@ -367,7 +367,7 @@ class TestRenderRequestPrompt:
         assert call["enable_thinking"] is False
 
     def test_reasoning_effort_enables_thinking(self):
-        runtime = AgentRuntime(TowelConfig())
+        runtime = AgentRuntime(DreamlandConfig())
 
         class _FakeTokenizer:
             def apply_chat_template(self, messages, **kwargs):
@@ -385,7 +385,7 @@ class TestRenderRequestPrompt:
         assert tok.kwargs["enable_thinking"] is True
 
     def test_no_tokenizer_falls_back_to_transcript(self):
-        runtime = AgentRuntime(TowelConfig())
+        runtime = AgentRuntime(DreamlandConfig())
         runtime._tokenizer = None
         req = {
             "mode": "mlx_prompt",
@@ -400,6 +400,6 @@ class TestRenderRequestPrompt:
     def test_neither_prompt_nor_messages_raises(self):
         import pytest
 
-        runtime = AgentRuntime(TowelConfig())
+        runtime = AgentRuntime(DreamlandConfig())
         with pytest.raises(ValueError, match="neither"):
             runtime._render_request_prompt({"mode": "mlx_prompt"})

@@ -1,6 +1,6 @@
 """Tests for the tool call parser."""
 
-from towel.agent.tool_parser import ToolCall, parse_tool_calls
+from dreamland.agent.tool_parser import ToolCall, parse_tool_calls
 
 
 def test_json_block_tool_call():

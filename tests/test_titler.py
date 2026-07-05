@@ -1,6 +1,6 @@
 """Tests for auto-title generation."""
 
-from towel.agent.titler import generate_title
+from dreamland.agent.titler import generate_title
 
 
 class TestGenerateTitle:

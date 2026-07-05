@@ -1,6 +1,6 @@
 """Tests for agent events."""
 
-from towel.agent.events import AgentEvent, EventType
+from dreamland.agent.events import AgentEvent, EventType
 
 
 def test_token_event():

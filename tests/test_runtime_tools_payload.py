@@ -13,13 +13,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from towel.agent.claude_runtime import ClaudeCodeRuntime, _extract_anthropic_tool_calls
-from towel.agent.llama_runtime import LlamaRuntime, _normalize_openai_tool_calls
-from towel.agent.ollama_runtime import OllamaRuntime, _normalize_ollama_tool_calls
-from towel.agent.tools_payload import tools_as_anthropic, tools_as_openai_functions
-from towel.config import TowelConfig
-from towel.skills.base import Skill, ToolDefinition
-from towel.skills.registry import SkillRegistry
+from dreamland.agent.claude_runtime import ClaudeCodeRuntime, _extract_anthropic_tool_calls
+from dreamland.agent.llama_runtime import LlamaRuntime, _normalize_openai_tool_calls
+from dreamland.agent.ollama_runtime import OllamaRuntime, _normalize_ollama_tool_calls
+from dreamland.agent.tools_payload import tools_as_anthropic, tools_as_openai_functions
+from dreamland.config import DreamlandConfig
+from dreamland.skills.base import Skill, ToolDefinition
+from dreamland.skills.registry import SkillRegistry
 
 
 class _ReadFileSkill(Skill):
@@ -103,7 +103,7 @@ class TestToolPayloadHelpers:
 
 class TestOllamaNativeTools:
     def _runtime(self) -> OllamaRuntime:
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         return OllamaRuntime(config, skills=_skills_with_one_tool())
 
     def test_system_prompt_drops_inline_listing_when_native(self):
@@ -154,7 +154,7 @@ class TestOllamaNativeTools:
 
 class TestLlamaNativeTools:
     def _runtime(self) -> LlamaRuntime:
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         return LlamaRuntime(config, skills=_skills_with_one_tool(), auto_start=False)
 
     def test_system_prompt_drops_inline_listing_when_native(self):
@@ -169,7 +169,7 @@ class TestLlamaNativeTools:
         # shell/file ops) gets tools=[...], which newer llama-server renders via
         # the chat template and older versions ignore harmlessly. See
         # roles.task_needs_tools.
-        from towel.agent.conversation import Conversation, Role
+        from dreamland.agent.conversation import Conversation, Role
 
         rt = self._runtime()
         assert rt._native_tools_supported is True
@@ -188,7 +188,7 @@ class TestLlamaNativeTools:
         assert "tools" not in req
 
     def test_build_inference_request_omits_tools_when_disabled(self):
-        from towel.agent.conversation import Conversation, Role
+        from dreamland.agent.conversation import Conversation, Role
 
         rt = self._runtime()
         rt._native_tools_supported = False
@@ -240,7 +240,7 @@ class _TextBlock:
 
 class TestClaudeNativeTools:
     def _runtime(self) -> ClaudeCodeRuntime:
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         return ClaudeCodeRuntime(config, skills=_skills_with_one_tool(), model="haiku")
 
     def test_system_prompt_drops_inline_listing_when_native(self):
@@ -294,7 +294,7 @@ class TestLlamaTokenAccounting:
     def _runtime_with_mock(self, response_data: dict[str, Any]) -> LlamaRuntime:
         import httpx
 
-        config = TowelConfig(identity="You are Towel.")
+        config = DreamlandConfig(identity="You are Dreamland.")
         rt = LlamaRuntime(config, skills=_skills_with_one_tool(), auto_start=False)
         rt._loaded = True
 
@@ -308,7 +308,7 @@ class TestLlamaTokenAccounting:
         return {
             "mode": "llama_chat",
             "messages": [{"role": "user", "content": "hello"}],
-            "system": "You are Towel.",
+            "system": "You are Dreamland.",
         }
 
     async def _generate(self, rt: LlamaRuntime, request: dict[str, Any]):
@@ -317,7 +317,7 @@ class TestLlamaTokenAccounting:
         # module level for the duration of the call.
         import httpx
 
-        from towel.agent import llama_runtime as mod
+        from dreamland.agent import llama_runtime as mod
 
         orig_async_client = mod.httpx.AsyncClient
 
@@ -386,7 +386,7 @@ class TestLlamaTokenAccounting:
 
 
 def _empty_conversation():
-    from towel.agent.conversation import Conversation, Role
+    from dreamland.agent.conversation import Conversation, Role
 
     conv = Conversation()
     conv.add(Role.USER, "hello")

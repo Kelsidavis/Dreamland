@@ -1,10 +1,10 @@
-"""Shared pytest fixtures and safety guards for the Towel test suite."""
+"""Shared pytest fixtures and safety guards for the Dreamland test suite."""
 
 from __future__ import annotations
 
 import pytest
 
-from towel.agent.runtime import AgentRuntime
+from dreamland.agent.runtime import AgentRuntime
 
 
 @pytest.fixture(autouse=True)

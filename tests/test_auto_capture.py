@@ -2,8 +2,8 @@
 
 import pytest
 
-from towel.memory.auto_capture import Capture, apply, extract
-from towel.memory.store import MemoryStore
+from dreamland.memory.auto_capture import Capture, apply, extract
+from dreamland.memory.store import MemoryStore
 
 # ── extract() pattern coverage ────────────────────────────────────────
 
@@ -62,8 +62,8 @@ class TestPreferencePattern:
 
 class TestProjectPattern:
     def test_my_project_is(self):
-        caps = extract("my project is towel, a local AI coordinator.")
-        assert any(c.key == "current_project" and "towel" in c.content for c in caps)
+        caps = extract("my project is dreamland, a local AI coordinator.")
+        assert any(c.key == "current_project" and "dreamland" in c.content for c in caps)
 
     def test_were_building(self):
         caps = extract("we're building a memory layer with FTS5.")
@@ -139,7 +139,7 @@ class TestNoiseRobustness:
     def test_long_paragraph_handles_multiple_patterns(self):
         text = (
             "Hi! I'm a senior engineer. I work at Anthropic. "
-            "my project is towel and we ship by EOQ. "
+            "my project is dreamland and we ship by EOQ. "
             "I prefer terse responses."
         )
         caps = extract(text)
@@ -202,7 +202,7 @@ class TestToolResultCapture:
     doesn't generate noise."""
 
     def test_explicit_remember_in_tool_output_captures(self, store):
-        from towel.memory.auto_capture import apply_tool_result
+        from dreamland.memory.auto_capture import apply_tool_result
         # A recall tool echoing back an explicit user statement — fires.
         written = apply_tool_result(
             "recall",
@@ -218,7 +218,7 @@ class TestToolResultCapture:
         # apply_tool_result restricts to explicit-remember, so a tool
         # spitting prose-shaped text doesn't accidentally re-capture
         # the user's role.
-        from towel.memory.auto_capture import apply_tool_result
+        from dreamland.memory.auto_capture import apply_tool_result
         written = apply_tool_result(
             "git_log",
             "I'm a backend engineer wrote in commit log",
@@ -228,7 +228,7 @@ class TestToolResultCapture:
         assert store.recall("role") is None
 
     def test_tool_source_label_distinguishes_origin(self, store):
-        from towel.memory.auto_capture import apply_tool_result
+        from dreamland.memory.auto_capture import apply_tool_result
         apply_tool_result(
             "recall", "remember that we ship by Friday", store,
         )

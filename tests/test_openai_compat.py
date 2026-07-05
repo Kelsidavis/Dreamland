@@ -5,17 +5,17 @@ import json
 import pytest
 from starlette.testclient import TestClient
 
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.store import ConversationStore
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.store import ConversationStore
 
 
 @pytest.fixture
 def client(tmp_path):
     store = ConversationStore(store_dir=tmp_path)
-    config = TowelConfig()
+    config = DreamlandConfig()
     agent = AgentRuntime(config)
     sessions = SessionManager(store=store)
     gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -46,14 +46,14 @@ class TestModelsEndpoint:
         model = resp.json()["data"][0]
         assert "id" in model
         assert model["object"] == "model"
-        assert model["owned_by"] == "towel"
+        assert model["owned_by"] == "dreamland"
 
     def test_model_includes_created_timestamp(self, client):
         """OpenAI's /v1/models response includes a `created` Unix
         timestamp per model. Older versions of the official OpenAI
         Python SDK raised a validation error when this field was
         missing. Some downstream clients (LangChain, llm CLI) also
-        read it. Without this, a Towel-backed OpenAI client that
+        read it. Without this, a Dreamland-backed OpenAI client that
         listed models couldn't tell what model registry version it
         was looking at."""
         import time
@@ -160,7 +160,7 @@ class TestChatCompletionsEndpoint:
 
     def test_rejects_multimodal_content_with_clear_message(self, client):
         """OpenAI's vision/audio shape uses `content` as a list of
-        parts. Towel doesn't support multimodal — but the previous
+        parts. Dreamland doesn't support multimodal — but the previous
         generic "non-empty content" 400 made vision clients think
         their content was empty. The error should name multimodal."""
         resp = client.post(
@@ -262,8 +262,8 @@ class TestChatCompletionsEndpoint:
 
         from starlette.testclient import TestClient
 
-        store = ConversationStore(store_dir=Path("/tmp/towel-test-oai"))
-        config = TowelConfig()
+        store = ConversationStore(store_dir=Path("/tmp/dreamland-test-oai"))
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         c = TestClient(gw._build_http_app())
@@ -285,7 +285,7 @@ class TestChatCompletionsEndpoint:
 
 class TestResponseFormat:
     def test_completion_format(self):
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion("id-1", 1234567890, "test-model", "Hello!", 10)
         assert result["id"] == "id-1"
@@ -299,7 +299,7 @@ class TestResponseFormat:
         assert result["usage"]["completion_tokens"] == 10
 
     def test_completion_has_required_fields(self):
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion("id", 0, "m", "content", 5)
         # All fields required by the OpenAI spec
@@ -317,11 +317,11 @@ class TestResponseFormat:
     def test_completion_includes_system_fingerprint(self):
         """`system_fingerprint` is what OpenAI clients use for cache
         invalidation — some LangChain caches and eval harnesses
-        depend on it. Towel emits a per-process value derived from
+        depend on it. Dreamland emits a per-process value derived from
         the package version so the fingerprint flips on coordinator
         upgrades (matching OpenAI's behaviour of changing it on
         model revisions) but stays stable within a process."""
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion("id", 0, "m", "content", 5)
         assert "system_fingerprint" in result
@@ -333,17 +333,17 @@ class TestResponseFormat:
         result2 = _format_completion("id-2", 1, "m", "different", 3)
         assert result2["system_fingerprint"] == fp
 
-    def test_format_completion_no_towel_field(self):
-        """The `towel`-namespaced metadata is attached by the
+    def test_format_completion_no_dreamland_field(self):
+        """The `dreamland`-namespaced metadata is attached by the
         chat_completions handler, NOT by _format_completion itself.
         A direct call to _format_completion must produce the strict
-        OpenAI shape — no `towel` field — so plain-vanilla
+        OpenAI shape — no `dreamland` field — so plain-vanilla
         ChatCompletion responses don't carry vendor noise when
         nothing collab-related happened."""
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion("id", 0, "m", "content", 5)
-        assert "towel" not in result
+        assert "dreamland" not in result
 
     def test_prompt_tokens_uses_supplied_value(self):
         """When the caller provides prompt_tokens (e.g. from the worker's
@@ -353,7 +353,7 @@ class TestResponseFormat:
         The previous implementation did `prompt_tokens = completion // 4`,
         which gave 0 for empty responses no matter how long the input was —
         meaningless usage data for any OpenAI client tracking spend."""
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion(
             "id", 0, "m", "content", 5, prompt_tokens=42,
@@ -365,7 +365,7 @@ class TestResponseFormat:
     def test_prompt_tokens_default_is_independent_of_completion(self):
         """Without an explicit prompt_tokens the formatter falls back to 1,
         not to a value derived from completion length."""
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
 
         result = _format_completion("id", 0, "m", "content", 9999)
         assert result["usage"]["prompt_tokens"] == 1
@@ -382,7 +382,7 @@ class TestNoneMetadataHandling:
     def test_non_stream_completion_handles_none_tokens(self, client):
         """A response with `tokens: None` in metadata must produce a
         well-formed completion response with the back-estimated count."""
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         # Stub the agent's step to return a response with None token
         # counts in metadata — what a worker job_error or empty-text
@@ -399,7 +399,7 @@ class TestNoneMetadataHandling:
         # Note: we can't easily patch the local agent from the client
         # fixture, so this test exercises the boundary via the
         # _format_completion code path directly.
-        from towel.gateway.openai_compat import _format_completion
+        from dreamland.gateway.openai_compat import _format_completion
         # completion_tokens=0 (what coercion produces for None);
         # _format_completion must compute total = 1 + 0 = 1 with no
         # TypeError.
@@ -422,9 +422,9 @@ class TestSSEFormat:
         the client saw "successfully empty"."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.agent.events import AgentEvent
-        from towel.gateway.openai_compat import _stream_sse
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.agent.events import AgentEvent
+        from dreamland.gateway.openai_compat import _stream_sse
 
         agent = MagicMock()
         conv = Conversation()
@@ -459,9 +459,9 @@ class TestSSEFormat:
         clients waiting for [DONE] before flushing would hang."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.agent.events import AgentEvent
-        from towel.gateway.openai_compat import _stream_sse
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.agent.events import AgentEvent
+        from dreamland.gateway.openai_compat import _stream_sse
 
         agent = MagicMock()
         conv = Conversation()
@@ -494,9 +494,9 @@ class TestSSEFormat:
         """Test the SSE generator produces valid format."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.agent.events import AgentEvent
-        from towel.gateway.openai_compat import _stream_sse
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.agent.events import AgentEvent
+        from dreamland.gateway.openai_compat import _stream_sse
 
         # Mock agent that yields token events
         agent = MagicMock()
@@ -536,7 +536,7 @@ class TestSSEFormat:
         # parity with the non-streaming completion. OpenAI's
         # streaming format includes the field on each chunk; some
         # cache layers key on it per-chunk.
-        from towel.gateway.openai_compat import _SYSTEM_FINGERPRINT
+        from dreamland.gateway.openai_compat import _SYSTEM_FINGERPRINT
         for c in chunks[:-1]:  # all except trailing [DONE]
             payload = json.loads(c.replace("data: ", ""))
             assert payload.get("system_fingerprint") == _SYSTEM_FINGERPRINT, c
@@ -554,9 +554,9 @@ class TestRemoteStreamFallback:
     async def test_falls_back_to_local_when_remote_errors_before_first_token(self):
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.agent.events import AgentEvent
-        from towel.gateway.openai_compat import _stream_sse_remote
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.agent.events import AgentEvent
+        from dreamland.gateway.openai_compat import _stream_sse_remote
 
         async def failing_remote(session_id, session, worker):
             raise RuntimeError("worker llama-server returned 400")
@@ -604,9 +604,9 @@ class TestRemoteStreamFallback:
         the role chunk to start a new assistant turn."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.agent.events import AgentEvent
-        from towel.gateway.openai_compat import _stream_sse_remote
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.agent.events import AgentEvent
+        from dreamland.gateway.openai_compat import _stream_sse_remote
 
         async def failing_remote(session_id, session, worker):
             raise RuntimeError("worker llama-server returned 400")
@@ -649,8 +649,8 @@ class TestRemoteStreamFallback:
         finish_reason=error so it knows something went wrong."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Conversation, Role
-        from towel.gateway.openai_compat import _stream_sse_remote
+        from dreamland.agent.conversation import Conversation, Role
+        from dreamland.gateway.openai_compat import _stream_sse_remote
 
         async def partial_remote(session_id, session, worker):
             yield "first-"
@@ -736,10 +736,10 @@ class TestCollaborationOnOpenAICompat:
         spec-strict OpenAI client (just better quality), but works."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -781,25 +781,25 @@ class TestCollaborationOnOpenAICompat:
         assert data["object"] == "chat.completion"
         assert len(data["choices"]) == 1
         assert "Paris" in data["choices"][0]["message"]["content"]
-        # Towel-specific metadata rides under a `towel` key so
-        # spec-strict OpenAI clients can ignore it but Towel-aware
+        # Dreamland-specific metadata rides under a `dreamland` key so
+        # spec-strict OpenAI clients can ignore it but Dreamland-aware
         # ones see whether ensemble actually ran.
-        assert data.get("towel", {}).get("ensemble") is True
+        assert data.get("dreamland", {}).get("ensemble") is True
 
-    def test_fallback_from_worker_surfaces_in_towel_field(self, tmp_path):
+    def test_fallback_from_worker_surfaces_in_dreamland_field(self, tmp_path):
         """When the primary worker returns empty text and the
         coordinator successfully retries on an alternate, the
-        response carries `towel.fallback_from_worker` +
+        response carries `dreamland.fallback_from_worker` +
         `fallback_reason` so OpenAI-aware clients can see the
         retry happened. Without this, an answer that came from
         the alt looks like a normal primary response."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -846,25 +846,25 @@ class TestCollaborationOnOpenAICompat:
         data = resp.json()
         # The successful retry's answer is the response content.
         assert "real answer from alt" in data["choices"][0]["message"]["content"]
-        # Towel-namespaced fields surface the retry path.
-        towel_meta = data.get("towel", {})
-        assert towel_meta.get("fallback_from_worker") == "fb-primary"
-        assert towel_meta.get("fallback_reason") == "empty_text"
+        # Dreamland-namespaced fields surface the retry path.
+        dreamland_meta = data.get("dreamland", {})
+        assert dreamland_meta.get("fallback_from_worker") == "fb-primary"
+        assert dreamland_meta.get("fallback_reason") == "empty_text"
 
-    def test_dual_empty_text_surfaces_in_towel_field(self, tmp_path):
+    def test_dual_empty_text_surfaces_in_dreamland_field(self, tmp_path):
         """When both the primary and the retry worker return the
         empty-text fallback (every worker tool-loops on the prompt),
         the openai-compat response keeps the primary's placeholder
-        but the `towel.dual_empty_text` field signals the fleet-wide
+        but the `dreamland.dual_empty_text` field signals the fleet-wide
         condition. Clients can render "both workers tool-looped"
         instead of treating it like a one-worker miss."""
         from unittest.mock import AsyncMock
 
-        from towel.agent.conversation import Message, Role
-        from towel.gateway.workers import WorkerInfo
+        from dreamland.agent.conversation import Message, Role
+        from dreamland.gateway.workers import WorkerInfo
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -904,23 +904,23 @@ class TestCollaborationOnOpenAICompat:
         )
         assert resp.status_code == 200
         data = resp.json()
-        towel_meta = data.get("towel", {})
-        assert towel_meta.get("dual_empty_text") is True
-        assert towel_meta.get("alt_worker") == "dual-alt"
+        dreamland_meta = data.get("dreamland", {})
+        assert dreamland_meta.get("dual_empty_text") is True
+        assert dreamland_meta.get("alt_worker") == "dual-alt"
 
-    def test_verify_skipped_surfaces_in_towel_field(self, tmp_path):
+    def test_verify_skipped_surfaces_in_dreamland_field(self, tmp_path):
         """When verify=true is requested but only one worker is
         registered, the verify pass has no alternate to run on
         and falls through. The response must carry
-        `towel.verify_skipped: true` + `verify_skip_reason` so
+        `dreamland.verify_skipped: true` + `verify_skip_reason` so
         OpenAI-aware clients see the same degraded-state signal
         they would on /api/ask."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -956,22 +956,22 @@ class TestCollaborationOnOpenAICompat:
         assert resp.status_code == 200
         data = resp.json()
         assert "primary answer" in data["choices"][0]["message"]["content"]
-        towel_meta = data.get("towel", {})
-        assert towel_meta.get("verify_skipped") is True
-        assert "no alternate worker" in towel_meta.get("verify_skip_reason", "")
+        dreamland_meta = data.get("dreamland", {})
+        assert dreamland_meta.get("verify_skipped") is True
+        assert "no alternate worker" in dreamland_meta.get("verify_skip_reason", "")
 
     def test_tools_param_surfaces_tools_ignored_flag(self, tmp_path):
         """OpenAI's ``tools`` parameter is for client-supplied
-        function schemas. Towel doesn't implement function-call
+        function schemas. Dreamland doesn't implement function-call
         passthrough yet — but rejecting with 400 would break
         clients (langchain, openai-python with structured output)
         that pass ``tools`` defensively even when not needed. Log
-        a server warning AND surface ``towel.tools_ignored: true``
+        a server warning AND surface ``dreamland.tools_ignored: true``
         so callers can detect the unsupported-feature path."""
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -1004,7 +1004,7 @@ class TestCollaborationOnOpenAICompat:
             },
         )
         assert resp.status_code == 200
-        assert resp.json().get("towel", {}).get("tools_ignored") is True
+        assert resp.json().get("dreamland", {}).get("tools_ignored") is True
 
         # Empty tools list → no flag (client said "no tools").
         resp = client.post(
@@ -1016,7 +1016,7 @@ class TestCollaborationOnOpenAICompat:
             },
         )
         assert resp.status_code == 200
-        assert "tools_ignored" not in resp.json().get("towel", {})
+        assert "tools_ignored" not in resp.json().get("dreamland", {})
 
         # No tools key at all → no flag.
         resp = client.post(
@@ -1027,19 +1027,19 @@ class TestCollaborationOnOpenAICompat:
             },
         )
         assert resp.status_code == 200
-        assert "tools_ignored" not in resp.json().get("towel", {})
+        assert "tools_ignored" not in resp.json().get("dreamland", {})
 
-    def test_ensemble_skipped_surfaces_in_towel_field(self, tmp_path):
+    def test_ensemble_skipped_surfaces_in_dreamland_field(self, tmp_path):
         """When ensemble=true is requested but no idle inference
         workers exist, the request falls through to the local agent
-        path. The response must carry `towel.ensemble_skipped: true`
+        path. The response must carry `dreamland.ensemble_skipped: true`
         so OpenAI-aware clients can render the same degraded-state
         badge they would on /api/ask."""
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -1068,29 +1068,29 @@ class TestCollaborationOnOpenAICompat:
         data = resp.json()
         # Local-agent fallback answered; ensemble didn't actually run.
         assert "local fallback" in data["choices"][0]["message"]["content"]
-        # Towel-namespaced field surfaces the silent degradation.
-        towel = data.get("towel", {})
-        assert towel.get("ensemble_skipped") is True
+        # Dreamland-namespaced field surfaces the silent degradation.
+        dreamland = data.get("dreamland", {})
+        assert dreamland.get("ensemble_skipped") is True
         # No-candidates case carries the matching skip_reason.
-        assert "no idle workers" in towel.get("ensemble_skip_reason", "")
+        assert "no idle workers" in dreamland.get("ensemble_skip_reason", "")
         # Empty contributions list still surfaced — parity with
         # /api/ask, where the field is always present so clients
         # don't special-case the missing-field path.
-        assert towel.get("ensemble_contributions") == []
+        assert dreamland.get("ensemble_contributions") == []
 
     def test_ensemble_skipped_reasons_surface_for_each_failure_mode(
         self, tmp_path,
     ):
         """OpenAI-compat parity with /api/ask: when ensemble fan-out
-        returns contributions but no usable answer, the towel-
+        returns contributions but no usable answer, the dreamland-
         namespaced block must distinguish empty_text vs timeout vs
         mixed failures and surface the per-worker contributions list
         so OpenAI-aware clients diagnose without curl-ing the
         dispatch log."""
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -1142,13 +1142,13 @@ class TestCollaborationOnOpenAICompat:
                 },
             )
             assert resp.status_code == 200
-            towel = resp.json().get("towel", {})
-            assert towel.get("ensemble_skipped") is True, towel
-            assert expected_phrase in towel.get("ensemble_skip_reason", ""), (
+            dreamland = resp.json().get("dreamland", {})
+            assert dreamland.get("ensemble_skipped") is True, dreamland
+            assert expected_phrase in dreamland.get("ensemble_skip_reason", ""), (
                 f"expected {expected_phrase!r}; got "
-                f"{towel.get('ensemble_skip_reason')!r}"
+                f"{dreamland.get('ensemble_skip_reason')!r}"
             )
-            assert towel.get("ensemble_contributions") == contributions
+            assert dreamland.get("ensemble_contributions") == contributions
 
     def test_verify_corrects_through_openai_compat(self, tmp_path):
         """End-to-end verify through /v1/chat/completions: the
@@ -1158,10 +1158,10 @@ class TestCollaborationOnOpenAICompat:
         just reachable via OpenAI clients with extra_body=verify."""
         from unittest.mock import MagicMock
 
-        from towel.agent.conversation import Message, Role
+        from dreamland.agent.conversation import Message, Role
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -1245,7 +1245,7 @@ class TestEphemeralSessionCleanup:
         """The helper closes affinity + slot AND drops the in-memory
         Session. Safe to call on a session that doesn't exist."""
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -1288,7 +1288,7 @@ class TestEphemeralSessionCleanup:
         path before the gateway routed anywhere) must be a no-op,
         not a crash."""
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)

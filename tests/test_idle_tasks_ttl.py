@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from towel.gateway.idle_tasks import (
+from dreamland.gateway.idle_tasks import (
     _DEFAULT_RESULT_TTL,
     IDLE_TASK_COOLDOWNS,
     IdleTask,
@@ -102,13 +102,13 @@ class TestPeriodicSweeper:
         import asyncio
         from unittest.mock import patch
 
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
 
         class _FakeAgent:
             pass
 
-        gw = GatewayServer(agent=_FakeAgent(), config=TowelConfig())
+        gw = GatewayServer(agent=_FakeAgent(), config=DreamlandConfig())
 
         purge_calls: list[int] = []
 
@@ -127,7 +127,7 @@ class TestPeriodicSweeper:
                 raise asyncio.CancelledError
 
         async def runner() -> None:
-            with patch("towel.gateway.server.asyncio.sleep", fake_sleep):
+            with patch("dreamland.gateway.server.asyncio.sleep", fake_sleep):
                 try:
                     await gw._sweep_idle_results(interval=0)
                 except asyncio.CancelledError:

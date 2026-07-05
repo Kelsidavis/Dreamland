@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from towel.skills.base import Skill, ToolDefinition
-from towel.skills.registry import SkillRegistry
+from dreamland.skills.base import Skill, ToolDefinition
+from dreamland.skills.registry import SkillRegistry
 
 
 class MockSkill(Skill):

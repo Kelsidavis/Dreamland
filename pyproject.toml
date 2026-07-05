@@ -1,5 +1,5 @@
 [project]
-name = "towel-ai"
+name = "dreamland"
 version = "2.3.0"
 description = "Don't Panic. Your local AI assistant."
 readme = "README.md"
@@ -65,17 +65,20 @@ embeddings = [
     "sentence-transformers>=2.7",
     "numpy>=1.24",
 ]
-all = ["towel-ai[mlx,dev,voice,embeddings]"]
+all = ["dreamland[mlx,dev,voice,embeddings]"]
 
 [project.scripts]
-towel = "towel.cli.main:cli"
+dreamland = "dreamland.cli.main:cli"
+# Legacy alias for the towel->dreamland rename — old muscle memory and
+# scripts keep working.
+towel = "dreamland.cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/towel"]
+packages = ["src/dreamland", "src/towel"]
 
 [tool.ruff]
 target-version = "py311"
@@ -87,7 +90,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.ruff.lint.per-file-ignores]
 # nodes/roles.py holds the TASK_REQUIREMENTS lookup table — single-line
 # entries are far more readable than splitting each into 6-line dict blocks.
-"src/towel/nodes/roles.py" = ["E501"]
+"src/dreamland/nodes/roles.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -104,6 +107,6 @@ strict = true
 
 
 [project.urls]
-Homepage = "https://github.com/Kelsidavis/Towel"
-Repository = "https://github.com/Kelsidavis/Towel"
-Issues = "https://github.com/Kelsidavis/Towel/issues"
+Homepage = "https://github.com/Kelsidavis/Dreamland"
+Repository = "https://github.com/Kelsidavis/Dreamland"
+Issues = "https://github.com/Kelsidavis/Dreamland/issues"

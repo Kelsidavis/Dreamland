@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from towel.cli.main import _load_model_with_friendly_error
+from dreamland.cli.main import _load_model_with_friendly_error
 
 
 class TestFriendlyLoadModel:
@@ -26,8 +26,10 @@ class TestFriendlyLoadModel:
         out = capsys.readouterr().out
         assert "bad model" in out
         assert "Failed to load model" in out
-        assert "towel setup" in out
-        assert "towel doctor" in out
+        # Word-level checks: Rich wraps the panel at terminal width and
+        # the longer "dreamland" command can split from its subcommand.
+        assert "setup" in out
+        assert "doctor" in out
 
     def test_handles_oserror_too(self, capsys):
         agent = MagicMock()

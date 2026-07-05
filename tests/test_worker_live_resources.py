@@ -11,7 +11,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
-from towel.gateway.worker_client import (
+from dreamland.gateway.worker_client import (
     RemoteWorkerClient,
     _detect_live_resources,
 )
@@ -24,12 +24,12 @@ class TestModelInventory:
     shouldn't get 70B requests."""
 
     def test_claude_inventory_is_the_three_aliases(self):
-        from towel.gateway.worker_client import _detect_available_models
+        from dreamland.gateway.worker_client import _detect_available_models
 
         assert _detect_available_models("claude", "") == ["sonnet", "opus", "haiku"]
 
     def test_unknown_backend_returns_empty_list(self):
-        from towel.gateway.worker_client import _detect_available_models
+        from dreamland.gateway.worker_client import _detect_available_models
 
         assert _detect_available_models("nope", "") == []
 
@@ -37,7 +37,7 @@ class TestModelInventory:
         """An active worker must report SOMETHING in available_models —
         the model it's actually serving. Probe failures (llama-server
         builds w/o /v1/models, network glitches) shouldn't drop it."""
-        from towel.gateway.worker_client import _detect_available_models
+        from dreamland.gateway.worker_client import _detect_available_models
 
         # Unknown backend → probe contributes nothing. With
         # current_model set, that name is still in the result.
@@ -49,7 +49,7 @@ class TestModelInventory:
     def test_current_model_deduped_when_probe_also_returns_it(self):
         """If the backend's probe DID find the active model, we
         shouldn't list it twice."""
-        from towel.gateway.worker_client import _detect_available_models
+        from dreamland.gateway.worker_client import _detect_available_models
 
         # Claude's probe returns the three fixed aliases. Passing
         # one as current_model shouldn't duplicate it.
@@ -63,7 +63,7 @@ class TestModelInventory:
     def test_dedupes_while_preserving_order(self):
         from unittest.mock import patch
 
-        from towel.gateway.worker_client import _detect_available_models
+        from dreamland.gateway.worker_client import _detect_available_models
 
         # MLX scans the HF cache. Patch the cache to return duplicates and
         # confirm de-dup keeps insertion order.
@@ -87,7 +87,7 @@ class TestModelInventory:
     def test_capabilities_include_max_param_b_est(self):
         # The full default_worker_capabilities path stitches the inventory +
         # the rough VRAM-or-RAM-derived param cap together.
-        from towel.gateway.worker_client import default_worker_capabilities
+        from dreamland.gateway.worker_client import default_worker_capabilities
 
         class _Model:
             name = "x"

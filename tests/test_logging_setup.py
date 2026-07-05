@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from towel.logging_setup import configure_terminal_logging
+from dreamland.logging_setup import configure_terminal_logging
 
 
 class TestConfigureTerminalLogging:

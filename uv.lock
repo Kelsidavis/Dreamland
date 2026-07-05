@@ -2183,7 +2183,7 @@ wheels = [
 ]
 
 [[package]]
-name = "towel-ai"
+name = "dreamland"
 version = "2.3.0"
 source = { editable = "." }
 dependencies = [
@@ -2259,7 +2259,7 @@ requires-dist = [
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5.0" },
     { name = "starlette", specifier = ">=0.45.0" },
     { name = "toml", specifier = ">=0.10.2" },
-    { name = "towel-ai", extras = ["mlx", "dev", "voice", "embeddings"], marker = "extra == 'all'" },
+    { name = "dreamland", extras = ["mlx", "dev", "voice", "embeddings"], marker = "extra == 'all'" },
     { name = "uvicorn", specifier = ">=0.34.0" },
     { name = "websockets", specifier = ">=14.0" },
     { name = "zeroconf", specifier = ">=0.130.0" },

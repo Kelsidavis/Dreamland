@@ -1,6 +1,6 @@
 # TurboQuant CUDA — KV cache compression for llama.cpp
 
-Port of Towel's MLX-based TurboQuant to NVIDIA GPUs via CUDA.
+Port of Dreamland's MLX-based TurboQuant to NVIDIA GPUs via CUDA.
 
 ## Algorithm
 

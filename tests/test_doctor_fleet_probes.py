@@ -1,11 +1,11 @@
-"""Tests for the fleet-endpoint probes in ``towel doctor``."""
+"""Tests for the fleet-endpoint probes in ``dreamland doctor``."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
 
-from towel.cli.doctor import (
+from dreamland.cli.doctor import (
     Check,
     _probe_fleet_endpoints,
     _probe_missing_persisted_workers,
@@ -22,7 +22,7 @@ def _coord_version_for_test() -> str:
     """The version doctor will compare workers against — pulled from
     the live package so the test fixtures don't drift on every bump."""
     try:
-        from towel import __version__ as v
+        from dreamland import __version__ as v
         return v
     except Exception:
         return "0.0.0"
@@ -39,7 +39,7 @@ class TestProbeFleetEndpoints:
                         "capabilities": {
                             "live_resources": {"cpu_pressure": 0.1},
                             "max_param_b_est": 70.0,
-                            "towel_version": _coord_version_for_test(),
+                            "dreamland_version": _coord_version_for_test(),
                         },
                     },
                     {
@@ -48,7 +48,7 @@ class TestProbeFleetEndpoints:
                         "capabilities": {
                             "live_resources": {"cpu_pressure": 0.5},
                             "max_param_b_est": 13.0,
-                            "towel_version": _coord_version_for_test(),
+                            "dreamland_version": _coord_version_for_test(),
                         },
                     },
                     {
@@ -57,7 +57,7 @@ class TestProbeFleetEndpoints:
                         "capabilities": {
                             "live_resources": {"cpu_pressure": 0.9},
                             "max_param_b_est": 3.0,
-                            "towel_version": _coord_version_for_test(),
+                            "dreamland_version": _coord_version_for_test(),
                         },
                     },
                 ],
@@ -599,7 +599,7 @@ class TestProbeMissingPersistedWorkers:
     just "Workers: 1" on a partial fleet."""
 
     def test_warns_when_persisted_worker_not_connected(self, tmp_path, monkeypatch):
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
         state_path = tmp_path / "worker_state.json"
         state_path.write_text(
             json.dumps({
@@ -627,7 +627,7 @@ class TestProbeMissingPersistedWorkers:
         assert any("worker host" in s for s in c.suggestions)
 
     def test_silent_when_all_persisted_workers_present(self, tmp_path, monkeypatch):
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
         state_path = tmp_path / "worker_state.json"
         state_path.write_text(
             json.dumps({
@@ -653,7 +653,7 @@ class TestProbeMissingPersistedWorkers:
     def test_disabled_persisted_workers_not_flagged_missing(self, tmp_path, monkeypatch):
         """An operator-disabled worker is intentionally excluded —
         its absence shouldn't trigger a 'missing' warning."""
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
         state_path = tmp_path / "worker_state.json"
         state_path.write_text(
             json.dumps({
@@ -675,7 +675,7 @@ class TestProbeMissingPersistedWorkers:
         assert c.warnings == []
 
     def test_no_persisted_state_is_silent(self, tmp_path, monkeypatch):
-        from towel.persistence import worker_state
+        from dreamland.persistence import worker_state
         monkeypatch.setattr(
             worker_state, "DEFAULT_WORKER_STATE_PATH", tmp_path / "absent.json"
         )

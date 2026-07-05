@@ -1,7 +1,7 @@
-"""Tests for the Towel launcher daemon.
+"""Tests for the Dreamland launcher daemon.
 
-The launcher exposes ``POST /launch`` which spawns ``towel worker`` as a
-subprocess. We stub :func:`towel.launcher._spawn_worker` so the tests can
+The launcher exposes ``POST /launch`` which spawns ``dreamland worker`` as a
+subprocess. We stub :func:`dreamland.launcher._spawn_worker` so the tests can
 exercise the routing/auth/validation logic without actually starting new
 processes.
 """
@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 
 from starlette.testclient import TestClient
 
-from towel import launcher
-from towel.launcher import _build_worker_argv, build_app
+from dreamland import launcher
+from dreamland.launcher import _build_worker_argv, build_app
 
 
 class TestArgvBuilder:
@@ -71,7 +71,8 @@ class TestArgvBuilder:
             }
         )
         assert err is None
-        assert argv[1] == "worker" or argv[2] == "worker"  # towel worker / python -m towel worker
+        # dreamland worker / python -m dreamland worker
+        assert "worker" in argv[:4]
         assert "--master" in argv
         assert "ws://controller:18742" in argv
         assert "--backend" in argv
@@ -99,7 +100,7 @@ class TestArgvBuilder:
     def test_model_field_forwarded_as_dash_dash_model(self):
         """The coordinator distributes different models by passing the
         ``model`` field in the launch payload — the launcher must forward
-        it as ``--model`` to ``towel worker``."""
+        it as ``--model`` to ``dreamland worker``."""
         argv, err = _build_worker_argv(
             {
                 "controller": "ws://x",
@@ -132,7 +133,7 @@ class TestAuth:
         client = TestClient(build_app(self.TOKEN))
         resp = client.get("/health")
         assert resp.status_code == 200
-        assert resp.json()["service"] == "towel-launcher"
+        assert resp.json()["service"] == "dreamland-launcher"
 
     def test_missing_auth_header_rejected(self):
         client = TestClient(build_app(self.TOKEN))
@@ -178,7 +179,7 @@ class TestLaunch:
         fake_proc.poll.return_value = exit_code
         # Use a non-existent path so _tail_bytes returns "". Tests that
         # care about log_tail patch _tail_bytes separately.
-        fake_log_path = Path("/tmp/towel-test-no-such-log")
+        fake_log_path = Path("/tmp/dreamland-test-no-such-log")
 
         spawn_patch = patch.object(
             launcher, "_spawn_worker", return_value=(fake_proc, fake_log_path)
@@ -262,7 +263,7 @@ class TestLaunch:
     def test_missing_binary_returns_500(self):
         client = TestClient(build_app(self.TOKEN))
         with patch.object(
-            launcher, "_spawn_worker", side_effect=FileNotFoundError("towel")
+            launcher, "_spawn_worker", side_effect=FileNotFoundError("dreamland")
         ):
             resp = client.post(
                 "/launch",
@@ -270,7 +271,7 @@ class TestLaunch:
                 headers=self._headers(),
             )
         assert resp.status_code == 500
-        assert "towel" in resp.json()["error"]
+        assert "dreamland" in resp.json()["error"]
 
     def test_worker_crashes_in_boot_grace_returns_500_with_tail(self):
         """A worker that exits inside the boot-grace window should turn
@@ -362,8 +363,8 @@ class TestUpgrade:
 
     def test_pip_strategy_runs_pip_install_upgrade(self):
         client = TestClient(build_app(self.TOKEN))
-        with patch("towel.launcher.subprocess.run") as run:
-            run.return_value = self._fake_run(stdout="Successfully installed towel-0.42.0")
+        with patch("dreamland.launcher.subprocess.run") as run:
+            run.return_value = self._fake_run(stdout="Successfully installed dreamland-0.42.0")
             resp = client.post(
                 "/upgrade",
                 json={"strategy": "pip"},
@@ -374,8 +375,8 @@ class TestUpgrade:
         assert data["ok"] is True
         assert data["returncode"] == 0
         assert data["strategy"] == "pip"
-        assert data["command"] == ["pip", "install", "--upgrade", "towel"]
-        assert "towel-0.42.0" in data["stdout"]
+        assert data["command"] == ["pip", "install", "--upgrade", "dreamland"]
+        assert "dreamland-0.42.0" in data["stdout"]
 
     def test_unknown_strategy_returns_400(self):
         client = TestClient(build_app(self.TOKEN))
@@ -389,7 +390,7 @@ class TestUpgrade:
 
     def test_custom_command_runs_verbatim(self):
         client = TestClient(build_app(self.TOKEN))
-        with patch("towel.launcher.subprocess.run") as run:
+        with patch("dreamland.launcher.subprocess.run") as run:
             run.return_value = self._fake_run(stdout="ok")
             resp = client.post(
                 "/upgrade",
@@ -412,7 +413,7 @@ class TestUpgrade:
 
     def test_nonzero_exit_marks_response_as_not_ok_with_500(self):
         client = TestClient(build_app(self.TOKEN))
-        with patch("towel.launcher.subprocess.run") as run:
+        with patch("dreamland.launcher.subprocess.run") as run:
             run.return_value = self._fake_run(
                 returncode=1, stderr="pip: command not found"
             )
@@ -429,7 +430,7 @@ class TestUpgrade:
 
     def test_timeout_returns_504(self):
         client = TestClient(build_app(self.TOKEN))
-        with patch("towel.launcher.subprocess.run") as run:
+        with patch("dreamland.launcher.subprocess.run") as run:
             run.side_effect = launcher.subprocess.TimeoutExpired(cmd=["pip"], timeout=300)
             resp = client.post(
                 "/upgrade",
@@ -450,11 +451,11 @@ class TestSelfUpgradeFailureRecord:
     next capability heartbeat surfaces them to the operator."""
 
     def _reset(self):
-        from towel import launcher as _l
+        from dreamland import launcher as _l
         _l._last_upgrade_attempt = None
 
     def test_unknown_strategy_records_failure(self):
-        from towel.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
+        from dreamland.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
         self._reset()
         assert self_upgrade_and_reexec("bogus") is False
         attempt = get_last_upgrade_attempt()
@@ -464,9 +465,9 @@ class TestSelfUpgradeFailureRecord:
         assert "ts" in attempt
 
     def test_command_failure_captures_exit_and_tail(self):
-        from towel.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
+        from dreamland.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
         self._reset()
-        with patch("towel.launcher.subprocess.run") as run:
+        with patch("dreamland.launcher.subprocess.run") as run:
             fake = MagicMock()
             fake.returncode = 1
             fake.stderr = "error line\nfinal explanation"
@@ -482,10 +483,10 @@ class TestSelfUpgradeFailureRecord:
     def test_timeout_records_status(self):
         import subprocess as _sp
 
-        from towel.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
+        from dreamland.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
         self._reset()
         with patch(
-            "towel.launcher.subprocess.run",
+            "dreamland.launcher.subprocess.run",
             side_effect=_sp.TimeoutExpired(cmd="pip", timeout=300),
         ):
             assert self_upgrade_and_reexec("pip") is False
@@ -494,10 +495,10 @@ class TestSelfUpgradeFailureRecord:
         assert attempt["status"] == "timeout"
 
     def test_command_not_found_records(self):
-        from towel.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
+        from dreamland.launcher import get_last_upgrade_attempt, self_upgrade_and_reexec
         self._reset()
         with patch(
-            "towel.launcher.subprocess.run",
+            "dreamland.launcher.subprocess.run",
             side_effect=FileNotFoundError("pip"),
         ):
             assert self_upgrade_and_reexec("pip") is False

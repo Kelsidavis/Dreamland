@@ -1,7 +1,7 @@
 """Tests for conversation titles."""
 
-from towel.agent.conversation import Conversation, Role
-from towel.persistence.store import ConversationStore
+from dreamland.agent.conversation import Conversation, Role
+from dreamland.persistence.store import ConversationStore
 
 
 class TestConversationTitle:
@@ -86,17 +86,17 @@ class TestGatewayRename:
     def test_rename_endpoint(self, tmp_path):
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="gw-rename")
         conv.add(Role.USER, "test")
         store.save(conv)
 
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -116,13 +116,13 @@ class TestGatewayRename:
     def test_rename_nonexistent(self, tmp_path):
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -136,13 +136,13 @@ class TestGatewayRename:
     def test_rename_empty_title_rejected(self, tmp_path):
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -161,17 +161,17 @@ class TestGatewayRename:
         title."""
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="mid-chat", title="old")
         conv.add(Role.USER, "hi")
         store.save(conv)
 
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         sessions = SessionManager(store=store)
         gw = GatewayServer(config=config, agent=agent, sessions=sessions)
@@ -205,16 +205,16 @@ class TestGatewayRename:
         response. Cap at 200."""
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="long-title")
         conv.add(Role.USER, "test")
         store.save(conv)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -232,16 +232,16 @@ class TestGatewayRename:
         is fine, it's the shape that's wrong. Reject precisely."""
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="bad-body")
         conv.add(Role.USER, "test")
         store.save(conv)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -258,16 +258,16 @@ class TestGatewayRename:
     def test_rename_rejects_non_string_title(self, tmp_path):
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="nonstr-title")
         conv.add(Role.USER, "test")
         store.save(conv)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -282,16 +282,16 @@ class TestGatewayRename:
         """Multi-line titles break list-view rendering and log readability."""
         from starlette.testclient import TestClient
 
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
         conv = Conversation(id="multiline-title")
         conv.add(Role.USER, "test")
         store.save(conv)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         gw = GatewayServer(config=config, agent=agent, sessions=SessionManager(store=store))
         client = TestClient(gw._build_http_app())
@@ -312,13 +312,13 @@ class TestAutoTitleHelper:
     /api/ask session shipped with title="" on disk."""
 
     def _make_gateway(self, tmp_path):
-        from towel.agent.runtime import AgentRuntime
-        from towel.config import TowelConfig
-        from towel.gateway.server import GatewayServer
-        from towel.gateway.sessions import SessionManager
+        from dreamland.agent.runtime import AgentRuntime
+        from dreamland.config import DreamlandConfig
+        from dreamland.gateway.server import GatewayServer
+        from dreamland.gateway.sessions import SessionManager
 
         store = ConversationStore(store_dir=tmp_path)
-        config = TowelConfig()
+        config = DreamlandConfig()
         agent = AgentRuntime(config)
         return GatewayServer(
             config=config, agent=agent, sessions=SessionManager(store=store),

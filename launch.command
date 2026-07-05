@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# launch.command — Start Towel and open the web UI. Don't Panic.
+# launch.command — Start Dreamland and open the web UI. Don't Panic.
 
 set -euo pipefail
 
 # cd to the script's directory so double-click works from Finder
 cd "$(dirname "$0")"
 
-# Activate the venv so `towel` is available
+# Activate the venv so `dreamland` is available
 source .venv/bin/activate
 
-PORT="${TOWEL_PORT:-18743}"
-HOST="${TOWEL_HOST:-127.0.0.1}"
+PORT="${DREAMLAND_PORT:-18743}"
+HOST="${DREAMLAND_HOST:-127.0.0.1}"
 URL="http://${HOST}:${PORT}/"
-CONFIG_PATH="${TOWEL_HOME:-$HOME/.towel}/config.toml"
+CONFIG_PATH="${DREAMLAND_HOME:-$HOME/.dreamland}/config.toml"
 
 # First-run guard: drop the user into the setup wizard so they pick a
 # backend + model before the chat UI starts. After saving, they press
@@ -20,7 +20,7 @@ CONFIG_PATH="${TOWEL_HOME:-$HOME/.towel}/config.toml"
 if [[ ! -f "$CONFIG_PATH" ]]; then
     echo "No config found at $CONFIG_PATH."
     echo "Launching the setup wizard first…"
-    towel setup &
+    dreamland setup &
     SETUP_PID=$!
     echo "Press Enter once you've saved your configuration to continue to chat."
     read -r _
@@ -28,7 +28,7 @@ if [[ ! -f "$CONFIG_PATH" ]]; then
 fi
 
 # Start the gateway in the background
-towel serve "$@" &
+dreamland serve "$@" &
 SERVER_PID=$!
 
 cleanup() {
@@ -37,10 +37,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Wait for the HTTP server to come up
-echo "Waiting for Towel to start..."
+echo "Waiting for Dreamland to start..."
 for i in $(seq 1 30); do
     if curl -sf "${URL}health" >/dev/null 2>&1; then
-        echo "Towel is up — opening ${URL}"
+        echo "Dreamland is up — opening ${URL}"
         if [[ "$(uname -s)" == "Darwin" ]]; then
             open "$URL"
         elif command -v xdg-open >/dev/null 2>&1; then

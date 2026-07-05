@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.agent.agents import (
+from dreamland.agent.agents import (
     AutonomousAgent,
     create_agent,
     delete_agent,
@@ -25,7 +25,7 @@ class TestAutonomousAgent:
 class TestAgentStorage:
     @pytest.fixture(autouse=True)
     def tmp_storage(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.agent.agents.AGENTS_FILE", tmp_path / "agents.json")
+        monkeypatch.setattr("dreamland.agent.agents.AGENTS_FILE", tmp_path / "agents.json")
 
     def test_create_and_list(self):
         create_agent("bot", "monitor things")
@@ -57,7 +57,7 @@ class TestAgentStorage:
         every prior agent gone. Rename the bad file aside instead.
         Same pattern persistence stores got (5512834, 98d1c68,
         8a86987)."""
-        from towel.agent import agents as _agents
+        from dreamland.agent import agents as _agents
         # Write a corrupt file in the test's monkeypatched location.
         bad = _agents.AGENTS_FILE
         bad.write_text("{ not valid json")

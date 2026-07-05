@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Towel integration test harness.
+"""Dreamland integration test harness.
 
-Sends prompts to a running Towel instance via /api/ask and verifies
+Sends prompts to a running Dreamland instance via /api/ask and verifies
 that tool calls work correctly and responses are useful.
 
 Usage:
@@ -42,7 +42,7 @@ class TestResult:
 
 
 def ask(prompt: str, session: str = SESSION) -> tuple[str, float]:
-    """Send a prompt to Towel and return (response, elapsed_seconds)."""
+    """Send a prompt to Dreamland and return (response, elapsed_seconds)."""
     start = time.monotonic()
     resp = httpx.post(
         f"{BASE_URL}/api/ask",
@@ -101,15 +101,15 @@ def test_basic_response() -> TestResult:
 
 def test_read_file() -> TestResult:
     """Tool: read_file — reads a known file."""
-    prompt = "Read the file .towel.md in the current directory and tell me the first heading."
+    prompt = "Read the file .dreamland.md in the current directory and tell me the first heading."
     resp, elapsed = ask(prompt, session=_s("read"))
-    passed, failed = check(resp, "Towel")
+    passed, failed = check(resp, "Dreamland")
     return TestResult("read_file", not failed, prompt, resp, elapsed, passed, failed)
 
 
 def test_list_directory() -> TestResult:
     """Tool: list_directory — lists project files."""
-    prompt = "List the files in the src/towel/agent/ directory. Just the filenames."
+    prompt = "List the files in the src/dreamland/agent/ directory. Just the filenames."
     resp, elapsed = ask(prompt, session=_s("listdir"))
     passed, failed = check(resp, "runtime", "tool_parser")
     return TestResult("list_directory", not failed, prompt, resp, elapsed, passed, failed)
@@ -178,9 +178,9 @@ def test_search_files() -> TestResult:
 
 def test_todo() -> TestResult:
     """Tool: todo_add — add a todo item."""
-    prompt = "Use the todo_add tool to add an item: 'Buy a towel'. Confirm it was added."
+    prompt = "Use the todo_add tool to add an item: 'Buy a dreamland'. Confirm it was added."
     resp, elapsed = ask(prompt, session=_s("todo"))
-    has_result = "towel" in resp.lower() or "added" in resp.lower() or "todo" in resp.lower()
+    has_result = "dreamland" in resp.lower() or "added" in resp.lower() or "todo" in resp.lower()
     passed = ["contains todo confirmation"] if has_result else []
     failed = [] if has_result else ["no todo confirmation found"]
     return TestResult("todo", not failed, prompt, resp, elapsed, passed, failed)
@@ -276,7 +276,7 @@ def run_suite() -> list[TestResult]:
     global _run_id
     _run_id += 1
     print(f"\n{'=' * 60}")
-    print(f"  Towel Test Harness — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Dreamland Test Harness — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 60}\n")
 
     # Check server is up
@@ -284,7 +284,7 @@ def run_suite() -> list[TestResult]:
         health = httpx.get(f"{BASE_URL}/health", timeout=5).json()
         print(f"  Server: {health.get('status', '?')} | v{health.get('version', '?')}")
     except Exception as e:
-        print(f"  ERROR: Towel is not running at {BASE_URL} — {e}")
+        print(f"  ERROR: Dreamland is not running at {BASE_URL} — {e}")
         sys.exit(1)
 
     results: list[TestResult] = []
@@ -339,7 +339,7 @@ def run_suite() -> list[TestResult]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Towel integration test harness")
+    parser = argparse.ArgumentParser(description="Dreamland integration test harness")
     parser.add_argument("--loop", type=int, default=0, help="Re-run every N minutes (0 = run once)")
     args = parser.parse_args()
 

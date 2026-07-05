@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from towel.mcp.server import (
+from dreamland.mcp.server import (
     MCP_PROTOCOL_VERSION,
     MemoryMCPServer,
     _tool_definitions,
 )
-from towel.memory.store import MemoryStore
+from dreamland.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ class TestHandshake:
         assert reply["result"]["protocolVersion"] == MCP_PROTOCOL_VERSION
         # Tools capability is what the spec uses to advertise tools/*.
         assert "tools" in reply["result"]["capabilities"]
-        assert reply["result"]["serverInfo"]["name"] == "towel-memory"
+        assert reply["result"]["serverInfo"]["name"] == "dreamland-memory"
 
     def test_initialized_notification_yields_no_reply(self, server):
         # Notifications carry no id and must never be replied to.

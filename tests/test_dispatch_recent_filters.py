@@ -12,13 +12,13 @@ from types import SimpleNamespace
 import pytest
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.gateway.dispatcher import DispatchDecision
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.dispatcher import DispatchDecision
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class _FakeAgent:
@@ -29,7 +29,7 @@ class _FakeAgent:
 def gateway(tmp_path):
     store = ConversationStore(store_dir=tmp_path)
     return GatewayServer(
-        config=TowelConfig(),
+        config=DreamlandConfig(),
         agent=_FakeAgent(),
         sessions=SessionManager(store=store),
         pin_store=SessionPinStore(path=tmp_path / "pins.json"),
@@ -130,7 +130,7 @@ class TestDispatchRecentFilters:
         # Three retry decisions: two from gpu-host as primary, one
         # from pi-host. The chosen worker (alt) is the same in both
         # cases — the question is "which primary did we fall off of?"
-        from towel.gateway.dispatcher import REASON_RETRY_EMPTY
+        from dreamland.gateway.dispatcher import REASON_RETRY_EMPTY
         for prev in ("gpu-host", "gpu-host", "pi-host"):
             d = DispatchDecision(
                 worker=_stub_worker("alt"),
@@ -404,7 +404,7 @@ class TestDispatchRecentFilters:
         # from pi-host) into the buffer. The previous_worker_id
         # surfaces in the tally; the alt worker (newly-picked) does
         # not.
-        from towel.gateway.dispatcher import REASON_RETRY_EMPTY
+        from dreamland.gateway.dispatcher import REASON_RETRY_EMPTY
         for prev in ("gpu-host", "gpu-host", "pi-host"):
             d = DispatchDecision(
                 worker=_stub_worker("alt"),

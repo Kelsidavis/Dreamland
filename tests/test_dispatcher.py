@@ -12,7 +12,7 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from towel.gateway.dispatcher import (
+from dreamland.gateway.dispatcher import (
     REASON_AFFINITY,
     REASON_CAPABILITY_FALLBACK,
     REASON_NO_WORKERS,
@@ -23,8 +23,8 @@ from towel.gateway.dispatcher import (
     REASON_TASK_MATCH,
     Dispatcher,
 )
-from towel.gateway.workers import WorkerInfo, WorkerRegistry
-from towel.nodes.roles import NodeRole, TaskType
+from dreamland.gateway.workers import WorkerInfo, WorkerRegistry
+from dreamland.nodes.roles import NodeRole, TaskType
 
 
 def _make_worker(
@@ -1109,7 +1109,7 @@ class TestDispatcherDefensiveCoercion:
         # when all workers are busy. We can also exercise the
         # private helper directly — both paths share the same
         # defensive code now.
-        from towel.nodes.roles import TaskType
+        from dreamland.nodes.roles import TaskType
         result = d._smaller_idle_worker_for_task(
             picked=picked, task=TaskType.CHAT, excluded=set(),
         )

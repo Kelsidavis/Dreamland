@@ -2,21 +2,21 @@
 
 import pytest
 
-from towel.cli.agent_mgr import (
+from dreamland.cli.agent_mgr import (
     clone_agent,
     create_agent,
     delete_agent,
     load_user_agents,
 )
-from towel.config import TowelConfig
+from dreamland.config import DreamlandConfig
 
 
 @pytest.fixture(autouse=True)
 def isolate_agents(tmp_path, monkeypatch):
     """Redirect agents.toml to a temp dir."""
     agents_file = tmp_path / "agents.toml"
-    monkeypatch.setattr("towel.cli.agent_mgr.AGENTS_FILE", agents_file)
-    monkeypatch.setattr("towel.config.TOWEL_HOME", tmp_path)
+    monkeypatch.setattr("dreamland.cli.agent_mgr.AGENTS_FILE", agents_file)
+    monkeypatch.setattr("dreamland.config.DREAMLAND_HOME", tmp_path)
 
 
 class TestCreateAgent:
@@ -66,7 +66,7 @@ class TestDeleteAgent:
 
 class TestCloneAgent:
     def test_clone_builtin(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         profile = clone_agent("coder", "my-coder", config)
         assert profile is not None
         assert "Qwen" in profile.model.name or "coder" in profile.identity.lower()
@@ -74,12 +74,12 @@ class TestCloneAgent:
         assert "my-coder" in agents
 
     def test_clone_nonexistent(self):
-        config = TowelConfig()
+        config = DreamlandConfig()
         assert clone_agent("nope", "new", config) is None
 
     def test_clone_user_agent(self):
         create_agent(name="src", model_name="m", identity="original")
-        config = TowelConfig()
+        config = DreamlandConfig()
         profile = clone_agent("src", "dst", config)
         assert profile is not None
 
@@ -88,7 +88,7 @@ class TestCLICommands:
     def test_agents_list(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["agents"])
@@ -98,7 +98,7 @@ class TestCLICommands:
     def test_agents_create(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(
@@ -122,7 +122,7 @@ class TestCLICommands:
     def test_agents_clone(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["agents", "clone", "coder", "my-coder"])
@@ -132,7 +132,7 @@ class TestCLICommands:
     def test_agents_delete(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         # Create then delete
@@ -144,7 +144,7 @@ class TestCLICommands:
     def test_cannot_delete_builtin(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["agents", "delete", "coder"])
@@ -153,7 +153,7 @@ class TestCLICommands:
     def test_agents_help(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["agents", "--help"])

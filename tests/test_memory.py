@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from towel.memory.store import MemoryEntry, MemoryStore, salience
+from dreamland.memory.store import MemoryEntry, MemoryStore, salience
 
 
 @pytest.fixture
@@ -87,13 +87,13 @@ class TestMemoryStore:
     def test_to_prompt_block_with_entries(self, store):
         store.remember("user_name", "Kelsi", memory_type="user")
         store.remember("style", "concise", memory_type="preference")
-        store.remember("project", "Towel v0.2", memory_type="project")
+        store.remember("project", "Dreamland v0.2", memory_type="project")
 
         block = store.to_prompt_block()
         assert "Persistent Memory" in block
         assert "Kelsi" in block
         assert "concise" in block
-        assert "Towel v0.2" in block
+        assert "Dreamland v0.2" in block
         assert "remember" in block.lower()
         assert "human user" in block
         assert "user_name" in block
@@ -211,7 +211,7 @@ class TestQueryRelevantPromptBlock:
         assert store.recall("miss").recall_count == 0
 
     def test_no_query_dumps_everything(self, store):
-        # Legacy callers (TUI, `towel memory list`) get the full corpus.
+        # Legacy callers (TUI, `dreamland memory list`) get the full corpus.
         for i in range(15):
             store.remember(f"k{i}", f"text {i}")
         block = store.to_prompt_block()
@@ -272,7 +272,7 @@ class TestQueryRelevantPromptBlock:
         import tempfile
         from pathlib import Path
 
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.store import MemoryStore
         with tempfile.TemporaryDirectory() as tmp:
             store = MemoryStore(store_dir=Path(tmp))
             store.remember(
@@ -292,7 +292,7 @@ class TestQueryRelevantPromptBlock:
 
 class TestJsonMigration:
     """The first time the new store opens against an existing
-    ~/.towel/memory/memories.json, we import it once into SQLite and
+    ~/.dreamland/memory/memories.json, we import it once into SQLite and
     rename the old file so we never re-import."""
 
     def _seed_json(self, dirpath, payload):
@@ -361,7 +361,7 @@ class TestSqliteBacking:
     def test_uses_sqlite_not_json(self, store):
         store.remember("k", "v")
         # The new on-disk format is memory.db, not memories.json. This
-        # is what callers like `towel doctor` and ops scripts will key
+        # is what callers like `dreamland doctor` and ops scripts will key
         # off when checking for migration.
         assert (store.store_dir / "memory.db").exists()
         assert not (store.store_dir / "memories.json").exists()
@@ -442,7 +442,7 @@ class TestAutoForget:
         store = MemoryStore(store_dir=tmp_path)
         store.remember("role", "engineer", "user")
         store.remember("style", "concise", "preference")
-        store.remember("project", "towel", "project")
+        store.remember("project", "dreamland", "project")
 
         # Even with extreme age, protected types survive.
         old = (datetime.now(UTC) - timedelta(days=1000)).isoformat()
@@ -774,19 +774,19 @@ class TestRecallLogCap:
         assert store.recall_log_size() == 2
 
     def test_open_for_config_applies_cap(self, tmp_path):
-        from towel.config import TowelConfig
-        from towel.memory.store import open_for_config
+        from dreamland.config import DreamlandConfig
+        from dreamland.memory.store import open_for_config
 
-        cfg = TowelConfig()
+        cfg = DreamlandConfig()
         cfg.memory_recall_log_cap = 99
         # Operate in tmp_path to keep the system store untouched.
         import os
-        os.environ["TOWEL_HOME"] = str(tmp_path)
+        os.environ["DREAMLAND_HOME"] = str(tmp_path)
         try:
             store = open_for_config(cfg)
             assert store.RECALL_LOG_CAP == 99
         finally:
-            os.environ.pop("TOWEL_HOME", None)
+            os.environ.pop("DREAMLAND_HOME", None)
 
 
 class TestRecallsReturning:

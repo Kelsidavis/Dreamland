@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.skills.builtin.data import DataSkill
+from dreamland.skills.builtin.data import DataSkill
 
 
 @pytest.fixture
@@ -19,8 +19,8 @@ class TestTools:
 class TestParseJSON:
     @pytest.mark.asyncio
     async def test_basic(self, skill):
-        result = await skill.execute("parse_json", {"data": '{"name": "Towel"}'})
-        assert "Towel" in result
+        result = await skill.execute("parse_json", {"data": '{"name": "Dreamland"}'})
+        assert "Dreamland" in result
 
     @pytest.mark.asyncio
     async def test_path_query(self, skill):

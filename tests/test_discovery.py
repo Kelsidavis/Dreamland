@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from towel.agent.discovery import GGUFModel, SystemCapabilities
+from dreamland.agent.discovery import GGUFModel, SystemCapabilities
 
 
 def test_best_model_prefers_abliterated_over_stock_and_coder():
-    # Towel runs abliterated chat models; a stock safety-trained model
+    # Dreamland runs abliterated chat models; a stock safety-trained model
     # (gpt-oss) or a larger task-specific coder model must NOT be picked
     # over an abliterated build that fits.
     caps = SystemCapabilities(

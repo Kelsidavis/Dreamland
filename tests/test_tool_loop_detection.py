@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from towel.agent.runtime import (
+from dreamland.agent.runtime import (
     TOOL_LOOP_REPEAT_LIMIT,
     _check_tool_loop,
     _tool_call_fingerprint,
@@ -91,7 +91,7 @@ class TestStepStreamingPersistsTerminalMessages:
     def test_step_streaming_persists_terminal_messages(self):
         import inspect
 
-        from towel.agent.runtime import AgentRuntime
+        from dreamland.agent.runtime import AgentRuntime
 
         src = inspect.getsource(AgentRuntime.step_streaming)
         # Both terminal branches must append to the conversation.

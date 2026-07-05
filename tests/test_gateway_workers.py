@@ -6,15 +6,15 @@ import json
 import pytest
 from starlette.testclient import TestClient
 
-from towel.agent.conversation import Role
-from towel.agent.runtime import AgentRuntime
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.gateway.workers import WorkerRegistry
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.agent.conversation import Role
+from dreamland.agent.runtime import AgentRuntime
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.gateway.workers import WorkerRegistry
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class DummyWS:
@@ -32,7 +32,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def gateway(store):
-    config = TowelConfig()
+    config = DreamlandConfig()
     agent = AgentRuntime(config)
     sessions = SessionManager(store=store)
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
@@ -187,7 +187,7 @@ class TestWorkerRegistry:
         assert picked.id == "no_telemetry"
 
     def test_quality_tier_helper_buckets_workers_correctly(self):
-        from towel.nodes.roles import worker_quality_tier
+        from dreamland.nodes.roles import worker_quality_tier
 
         assert worker_quality_tier({"backend": "claude"}) == "high"
         assert worker_quality_tier(
@@ -371,7 +371,7 @@ class TestRemoteExecution:
         sufficient to guard against accidental removal."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._step_remote_inference_inner)
         # Loop-detection fingerprint, threshold, and break path.
@@ -391,7 +391,7 @@ class TestRemoteExecution:
         either function can carry the markers."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = (
             inspect.getsource(GatewayServer._stream_remote_inference)
@@ -415,7 +415,7 @@ class TestRemoteExecution:
         split)."""
         import inspect
 
-        from towel.gateway.server import GatewayServer
+        from dreamland.gateway.server import GatewayServer
 
         src = inspect.getsource(GatewayServer._stream_remote_inference_inner)
         # Both terminal branches must append to the conversation.

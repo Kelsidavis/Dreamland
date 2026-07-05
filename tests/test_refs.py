@@ -1,6 +1,6 @@
 """Tests for @file reference expansion."""
 
-from towel.agent.refs import _ext_to_lang, expand_refs, parse_refs
+from dreamland.agent.refs import _ext_to_lang, expand_refs, parse_refs
 
 
 class TestParseRefs:
@@ -16,9 +16,9 @@ class TestParseRefs:
         assert refs[0].path == "./config.toml"
 
     def test_home_path(self):
-        refs = parse_refs("check @~/.towel/config.toml")
+        refs = parse_refs("check @~/.dreamland/config.toml")
         assert len(refs) == 1
-        assert refs[0].path == "~/.towel/config.toml"
+        assert refs[0].path == "~/.dreamland/config.toml"
 
     def test_line_range(self):
         refs = parse_refs("explain @main.py:10-20")
@@ -126,14 +126,14 @@ class TestExpandRefs:
 
 class TestUrlRefs:
     def test_url_pattern_parsed(self):
-        from towel.agent.refs import _URL_PATTERN
+        from dreamland.agent.refs import _URL_PATTERN
 
         m = _URL_PATTERN.findall("check @https://example.com/api.json please")
         assert len(m) == 1
         assert m[0] == "https://example.com/api.json"
 
     def test_http_pattern(self):
-        from towel.agent.refs import _URL_PATTERN
+        from dreamland.agent.refs import _URL_PATTERN
 
         m = _URL_PATTERN.findall("see @http://localhost:8080/health")
         assert len(m) == 1

@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.templates.engine import BUILTIN_TEMPLATES, TemplateEngine
+from dreamland.templates.engine import BUILTIN_TEMPLATES, TemplateEngine
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ class TestCLI:
     def test_templates_command(self):
         from click.testing import CliRunner
 
-        from towel.cli.main import cli
+        from dreamland.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["templates"])

@@ -18,8 +18,8 @@ import struct
 
 import pytest
 
-from towel.memory import embeddings as emb
-from towel.memory.store import MemoryStore
+from dreamland.memory import embeddings as emb
+from dreamland.memory.store import MemoryStore
 
 # ── module-state isolation ────────────────────────────────────────────
 

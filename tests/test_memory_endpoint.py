@@ -7,13 +7,13 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from towel.config import TowelConfig
-from towel.gateway.server import GatewayServer
-from towel.gateway.sessions import SessionManager
-from towel.memory.store import MemoryStore
-from towel.persistence.session_pins import SessionPinStore
-from towel.persistence.store import ConversationStore
-from towel.persistence.worker_state import WorkerStateStore
+from dreamland.config import DreamlandConfig
+from dreamland.gateway.server import GatewayServer
+from dreamland.gateway.sessions import SessionManager
+from dreamland.memory.store import MemoryStore
+from dreamland.persistence.session_pins import SessionPinStore
+from dreamland.persistence.store import ConversationStore
+from dreamland.persistence.worker_state import WorkerStateStore
 
 
 class _FakeAgent:
@@ -40,7 +40,7 @@ def _gateway(store, agent: Any) -> GatewayServer:
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
     return GatewayServer(
-        config=TowelConfig(),
+        config=DreamlandConfig(),
         agent=agent,
         sessions=sessions,
         pin_store=pin_store,

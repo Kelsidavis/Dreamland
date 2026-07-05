@@ -1,7 +1,7 @@
 """Tests for shared cluster memory synchronization."""
 
-from towel.memory.cluster import ClusterMemorySync, MemoryMutation
-from towel.memory.store import MemoryStore
+from dreamland.memory.cluster import ClusterMemorySync, MemoryMutation
+from dreamland.memory.store import MemoryStore
 
 
 class TestClusterMemorySync:
@@ -215,8 +215,8 @@ class TestClusterCarriesAllFields:
     and out the other side intact."""
 
     def test_remember_propagates_tags_and_scope(self, tmp_path):
-        from towel.memory.cluster import ClusterMemorySync
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.cluster import ClusterMemorySync
+        from dreamland.memory.store import MemoryStore
 
         # Controller side (where the write originates).
         ctl_store = MemoryStore(store_dir=tmp_path / "ctl")
@@ -246,8 +246,8 @@ class TestClusterCarriesAllFields:
         assert e.scope == "proj:alpha"
 
     def test_snapshot_round_trip_preserves_fields(self, tmp_path):
-        from towel.memory.cluster import ClusterMemorySync
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.cluster import ClusterMemorySync
+        from dreamland.memory.store import MemoryStore
 
         ctl_store = MemoryStore(store_dir=tmp_path / "ctl")
         ctl_store.remember(

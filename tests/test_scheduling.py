@@ -2,7 +2,7 @@
 
 import pytest
 
-from towel.agent.scheduling import (
+from dreamland.agent.scheduling import (
     Schedule,
     add_schedule,
     list_schedules,
@@ -28,7 +28,9 @@ class TestSchedule:
 class TestScheduleStorage:
     @pytest.fixture(autouse=True)
     def tmp_storage(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("towel.agent.scheduling.SCHEDULES_FILE", tmp_path / "schedules.json")
+        monkeypatch.setattr(
+            "dreamland.agent.scheduling.SCHEDULES_FILE", tmp_path / "schedules.json",
+        )
 
     def test_add_and_list(self):
         add_schedule("daily", "0 9 * * *", "pipeline:project-health")

@@ -1,13 +1,13 @@
 """Tests for conversation management."""
 
-from towel.agent.conversation import Conversation, Message, Role
+from dreamland.agent.conversation import Conversation, Message, Role
 
 
 def test_conversation_add():
     conv = Conversation()
-    msg = conv.add(Role.USER, "Hello, Towel!")
+    msg = conv.add(Role.USER, "Hello, Dreamland!")
     assert msg.role == Role.USER
-    assert msg.content == "Hello, Towel!"
+    assert msg.content == "Hello, Dreamland!"
     assert len(conv) == 1
 
 

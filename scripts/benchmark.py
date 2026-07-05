@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Towel cluster nodes via the OpenAI-compatible API.
+Benchmark Dreamland cluster nodes via the OpenAI-compatible API.
 
 Measures per-node: tokens/sec, TTFT, total latency, and response quality.
 
@@ -173,8 +173,8 @@ def run_streaming(client: httpx.Client, api_base: str, prompt: dict, session_id:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark Towel cluster nodes")
-    parser.add_argument("--api", default="http://127.0.0.1:18743", help="Towel HTTP API base URL")
+    parser = argparse.ArgumentParser(description="Benchmark Dreamland cluster nodes")
+    parser.add_argument("--api", default="http://127.0.0.1:18743", help="Dreamland HTTP API base URL")
     parser.add_argument("--runs", type=int, default=1, help="Runs per prompt per node")
     parser.add_argument("--warmup", action="store_true", help="Send a warmup request first")
     args = parser.parse_args()
@@ -194,10 +194,10 @@ def main() -> None:
         workers = workers_data.get("workers", [])
 
     if not workers:
-        print("No workers connected. Start workers with: towel worker --controller <url>")
+        print("No workers connected. Start workers with: dreamland worker --controller <url>")
         sys.exit(1)
 
-    print(f"\nTowel Cluster Benchmark")
+    print(f"\nDreamland Cluster Benchmark")
     print(f"API: {api}")
     print(f"Workers: {len(workers)}")
     print(f"Prompts: {len(PROMPTS)} × {args.runs} run(s) each\n")

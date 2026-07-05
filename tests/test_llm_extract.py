@@ -2,7 +2,7 @@
 
 These cover the prompt → response parsing layer; the actual model
 invocation is mocked since CI doesn't load a backend. Real-model
-quality is observed via `towel memory extract` on the operator's
+quality is observed via `dreamland memory extract` on the operator's
 own backend.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from towel.memory.llm_extract import (
+from dreamland.memory.llm_extract import (
     LLMCapture,
     extract_via_llm,
     parse_response,
@@ -117,8 +117,8 @@ class TestScheduleBackgroundExtraction:
     the scheduled task complete, then inspect the store."""
 
     def test_schedules_and_writes_captures(self, tmp_path):
-        from towel.memory.llm_extract import _inflight, schedule_background_extraction
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.llm_extract import _inflight, schedule_background_extraction
+        from dreamland.memory.store import MemoryStore
 
         _inflight.clear()  # isolate from other tests
         store = MemoryStore(store_dir=tmp_path)
@@ -139,8 +139,8 @@ class TestScheduleBackgroundExtraction:
         assert store.recall("role").source == "llm_extract:auto"
 
     def test_deduplicates_inflight_text(self, tmp_path):
-        from towel.memory.llm_extract import _inflight, schedule_background_extraction
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.llm_extract import _inflight, schedule_background_extraction
+        from dreamland.memory.store import MemoryStore
 
         _inflight.clear()
         store = MemoryStore(store_dir=tmp_path)
@@ -166,8 +166,8 @@ class TestScheduleBackgroundExtraction:
     def test_no_loop_returns_false(self, tmp_path):
         # Calling outside an asyncio loop must just refuse to
         # schedule rather than crash the synchronous caller.
-        from towel.memory.llm_extract import _inflight, schedule_background_extraction
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.llm_extract import _inflight, schedule_background_extraction
+        from dreamland.memory.store import MemoryStore
 
         _inflight.clear()
         store = MemoryStore(store_dir=tmp_path)
@@ -180,8 +180,8 @@ class TestScheduleBackgroundExtraction:
         assert result is False
 
     def test_empty_text_skips_schedule(self, tmp_path):
-        from towel.memory.llm_extract import _inflight, schedule_background_extraction
-        from towel.memory.store import MemoryStore
+        from dreamland.memory.llm_extract import _inflight, schedule_background_extraction
+        from dreamland.memory.store import MemoryStore
 
         _inflight.clear()
         store = MemoryStore(store_dir=tmp_path)
