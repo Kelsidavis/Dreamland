@@ -140,3 +140,19 @@ class TestSeedFileWidget:
             Path(__file__).parent.parent / "src" / "towel" / "web" / "index.html"
         ).read_bytes()
         assert b"\x00" not in raw
+
+
+class TestGitHistoryUI:
+    def test_history_elements_exist(self):
+        assert "orch-git-btn" in HTML
+        assert "orchGitLog" in HTML
+        assert "orchGitDiff" in HTML
+
+    def test_uses_git_endpoints(self):
+        assert "/git/log" in HTML
+        assert "/git/diff/" in HTML
+
+    def test_diff_lines_escaped(self):
+        # Diff content is model-generated code rendered via innerHTML —
+        # every line must pass through the escaper.
+        assert "const esc = orchEsc(line);" in HTML

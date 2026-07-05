@@ -500,6 +500,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
                     title="Browse the project files this run produced">files</button>
             <button class="tb-btn" id="orch-download-btn"
                     title="Download the whole workspace as a zip">↓ zip</button>
+            <button class="tb-btn" id="orch-git-btn"
+                    title="Project commit history — every run is a commit">history</button>
           </div>
           <div class="fleet-list" id="orch-files-list" style="margin-top:8px"></div>
           <div id="orch-file-head" style="display:none;font-family:var(--mono);
@@ -1562,6 +1564,65 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     });
   }
 
+  // ---- Project history: every run commits its workspace, so the
+  // git log is the project timeline and each commit's patch shows
+  // exactly what that run changed.
+  async function orchGitLog() {
+    const id = orchFileTargetId();
+    const listEl = document.getElementById('orch-files-list');
+    if (!id) { listEl.innerHTML =
+      '<div style="font-size:11px;color:var(--text-dim)">No run selected.</div>'; return; }
+    const data = await apiGet('/api/orchestrate/' + encodeURIComponent(id) + '/git/log');
+    if (data.error) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--red)">' +
+        orchEsc(data.error) + '</div>';
+      return;
+    }
+    const commits = data.commits || [];
+    listEl.innerHTML = commits.map(function(c) {
+      return '<div class="fleet-card orch-commit-row" data-sha="' +
+        orchEsc(c.sha) + '" style="padding:6px 10px;cursor:pointer;' +
+        'font-family:var(--mono);font-size:11px">' +
+        '<span style="color:var(--yellow)">' + orchEsc(c.sha) + '</span> ' +
+        orchEsc(c.message) +
+        ' <span style="color:var(--text-dim)">' +
+        orchEsc((c.date || '').slice(0, 16).replace('T', ' ')) + '</span></div>';
+    }).join('') || '<div style="font-size:11px;color:var(--text-dim)">No commits yet.</div>';
+    listEl.querySelectorAll('.orch-commit-row').forEach(function(row) {
+      row.addEventListener('click', function() {
+        orchGitDiff(id, row.dataset.sha);
+      });
+    });
+  }
+
+  async function orchGitDiff(id, sha) {
+    const headEl = document.getElementById('orch-file-head');
+    const viewEl = document.getElementById('orch-file-view');
+    const url = apiBase + '/api/orchestrate/' + encodeURIComponent(id) +
+      '/git/diff/' + encodeURIComponent(sha);
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      headEl.style.display = '';
+      headEl.textContent = 'commit ' + sha + ' — failed to load (' + resp.status + ')';
+      viewEl.style.display = 'none';
+      return;
+    }
+    const text = await resp.text();
+    headEl.style.display = '';
+    headEl.textContent = 'commit ' + sha;
+    viewEl.style.display = '';
+    viewEl.innerHTML = text.split('\n').map(function(line) {
+      const esc = orchEsc(line);
+      if (line.startsWith('+') && !line.startsWith('+++'))
+        return '<span style="color:var(--green)">' + esc + '</span>';
+      if (line.startsWith('-') && !line.startsWith('---'))
+        return '<span style="color:var(--red)">' + esc + '</span>';
+      if (line.startsWith('@@'))
+        return '<span style="color:var(--cyan)">' + esc + '</span>';
+      return esc;
+    }).join('\n');
+  }
+
   async function orchFileView(id, path) {
     const headEl = document.getElementById('orch-file-head');
     const viewEl = document.getElementById('orch-file-view');
@@ -2538,6 +2599,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
+  document.getElementById('orch-git-btn').addEventListener('click',orchGitLog);
   document.getElementById('orch-addfiles-btn').addEventListener('click',function(){
     document.getElementById('orch-file-input').click();
   });

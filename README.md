@@ -273,9 +273,15 @@ towel orchestrate \
   unpacks a build on any machine, and the fleet panel includes a file
   explorer / code viewer with a zip download over the same endpoints.
 - **Push existing code back** — `POST /api/orchestrate` accepts
-  `"files": {"path": "content"}` (CLI `--file mycode.py`), seeding the
-  workspace so the goal modifies real code instead of starting from
-  scratch: pull → edit → push → pull the result.
+  `"files": {"path": "content"}` (CLI `--file mycode.py` or the web
+  panel's "+ seed files" picker), seeding the workspace so the goal
+  modifies real code instead of starting from scratch: pull → edit →
+  push → pull the result.
+- **Project git history** — managed workspaces are git repos; seeds and
+  every finished run land as commits. `GET /api/orchestrate/<id>/git/log`
+  and `…/git/diff/<sha>` serve the timeline, and the web explorer's
+  "history" button renders it with a colored diff viewer — a personal
+  GitHub-style view of what the fleet changed, run by run.
 
 Hand-authored plans still work: `towel orchestrate plan.json` or
 repeated `--task "role:prompt@deps+tools"` specs.

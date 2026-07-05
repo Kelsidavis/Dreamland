@@ -68,6 +68,16 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **Git-backed project history**: managed workspaces are git repos —
+  seed files commit as "Seed files: <goal>", each finished run commits
+  as "achieved/completed/partial: <goal> [towel:<id>]", so the project
+  timeline is a real git log and each run's changes are a real diff.
+  `GET /api/orchestrate/<id>/git/log` and `…/git/diff/<sha>` serve
+  them; the web explorer gains a "history" button with a colored diff
+  viewer. Caller-supplied workspace dirs are never touched unless the
+  request opts in with `"git": true`; per-invocation git identity, so
+  nothing mutates user git config; history is best-effort (a missing
+  git binary never fails a run).
 - **Seed files in the browser**: the Orchestrate panel gains a
   "+ seed files" picker — local code files are read client-side
   (FileReader), shown as removable chips, and sent in the JSON `files`

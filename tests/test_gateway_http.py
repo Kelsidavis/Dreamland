@@ -5991,3 +5991,95 @@ class TestSeedFiles:
             "files": {f"f{i}.py": "x" for i in range(33)},
         })
         assert resp.status_code == 400
+
+
+class TestGitHistory:
+    """Managed workspaces are git repos: every run commits, and
+    /git/log + /git/diff/<sha> serve the project timeline."""
+
+    def _run(self, gateway, client, goal="build it", files=None):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nVALUE = 2\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        body = {
+            "goal": goal,
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "mod.py"}],
+        }
+        if files:
+            body["files"] = files
+        resp = client.post("/api/orchestrate", json=body)
+        assert resp.status_code == 200
+        return resp.json()["orchestration_id"]
+
+    def test_run_commits_and_log_serves_history(self, gateway, client):
+        oid = self._run(
+            gateway, client,
+            files={"mod.py": "VALUE = 1\n"},
+        )
+        log_resp = client.get(f"/api/orchestrate/{oid}/git/log")
+        assert log_resp.status_code == 200
+        commits = log_resp.json()["commits"]
+        # Seed commit + result commit, newest first.
+        assert len(commits) == 2
+        assert "towel:" in commits[0]["message"]
+        assert commits[1]["message"].startswith("Seed files:")
+
+        # The result commit's diff shows the change the run made.
+        diff = client.get(
+            f"/api/orchestrate/{oid}/git/diff/{commits[0]['sha']}"
+        )
+        assert diff.status_code == 200
+        assert "-VALUE = 1" in diff.text
+        assert "+VALUE = 2" in diff.text
+
+    def test_user_workspace_untouched_without_opt_in(
+        self, gateway, client, tmp_path,
+    ):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nX = 1\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "mine"),
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "f.py"}],
+        })
+        assert resp.status_code == 200
+        assert not (tmp_path / "mine" / ".git").exists()
+        oid = resp.json()["orchestration_id"]
+        assert client.get(f"/api/orchestrate/{oid}/git/log").status_code == 404
+
+    def test_explicit_workspace_with_git_opt_in(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nX = 1\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "mine"),
+            "git": True,
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "f.py"}],
+        })
+        assert resp.status_code == 200
+        assert (tmp_path / "mine" / ".git").exists()
+
+    def test_diff_sha_validation(self, gateway, client):
+        oid = self._run(gateway, client)
+        resp = client.get(f"/api/orchestrate/{oid}/git/diff/not-a-sha;rm")
+        assert resp.status_code == 400
+
+    def test_unknown_commit_404(self, gateway, client):
+        oid = self._run(gateway, client)
+        assert client.get(
+            f"/api/orchestrate/{oid}/git/diff/deadbeef"
+        ).status_code == 404

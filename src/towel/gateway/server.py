@@ -2945,6 +2945,47 @@ class GatewayServer:
         p.mkdir(parents=True, exist_ok=True)
         return str(p.resolve())
 
+    async def _run_git(
+        self, workspace: str, *args: str,
+    ) -> tuple[int | None, str]:
+        """Run one git command in a workspace. Returns (returncode,
+        combined output). Identity is passed per-invocation so nothing
+        mutates the user's git config."""
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", workspace,
+            "-c", "user.email=towel@local",
+            "-c", "user.name=Towel Orchestrator",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await proc.communicate()
+        return proc.returncode, out.decode("utf-8", errors="replace")
+
+    async def _git_commit_workspace(self, workspace: str, message: str) -> None:
+        """Snapshot a workspace into its git history (init on first
+        use). Best-effort by design: version history is a convenience —
+        a missing git binary or a commit failure must never fail the
+        orchestration that produced the files."""
+        try:
+            if not (Path(workspace) / ".git").exists():
+                rc, out = await self._run_git(workspace, "init", "-q")
+                if rc != 0:
+                    log.warning("git init failed in %s: %s", workspace, out)
+                    return
+            await self._run_git(workspace, "add", "-A")
+            rc, out = await self._run_git(
+                workspace, "commit", "-q", "-m", message,
+            )
+            if rc not in (0, 1):
+                # rc 1 = "nothing to commit" — a run that changed no
+                # files is fine.
+                log.warning("git commit failed in %s: %s", workspace, out)
+        except FileNotFoundError:
+            log.warning("git not installed — workspace history disabled")
+        except OSError as exc:
+            log.warning("git snapshot failed in %s: %s", workspace, exc)
+
     def _persist_orchestration(
         self,
         oid: str,
@@ -7709,6 +7750,21 @@ class GatewayServer:
                     status_code=400,
                 )
 
+            # Git history policy: managed workspaces get a repo
+            # automatically (they're ours); caller-supplied directories
+            # only with an explicit "git": true — never touch a user's
+            # directory uninvited. Read-only log/diff endpoints work on
+            # any workspace that already has a .git either way.
+            git_raw = body.get("git")
+            if git_raw is not None and not isinstance(git_raw, bool):
+                return JSONResponse(
+                    {"error": "git must be a boolean"}, status_code=400,
+                )
+            workspace_was_explicit = workspace_dir is not None
+            git_enabled = (
+                git_raw if git_raw is not None else not workspace_was_explicit
+            )
+
             def _write_seed_files(ws: str) -> None:
                 from pathlib import Path as _Path
                 root = _Path(ws)
@@ -7735,6 +7791,10 @@ class GatewayServer:
                 if workspace_dir is None:
                     workspace_dir = self._managed_workspace(oid)
                 _write_seed_files(workspace_dir)
+                if git_enabled and seed_files_raw:
+                    await self._git_commit_workspace(
+                        workspace_dir, f"Seed files: {goal[:60]}",
+                    )
                 if auto_plan:
                     try:
                         tasks = await orch.plan(
@@ -7776,6 +7836,15 @@ class GatewayServer:
                     return JSONResponse(
                         {"error": _err_str(exc)}, status_code=500,
                     )
+                if git_enabled:
+                    achieved = (
+                        "achieved" if result.goal_achieved
+                        else "completed" if result.success else "partial"
+                    )
+                    await self._git_commit_workspace(
+                        workspace_dir,
+                        f"{achieved}: {goal[:60]} [towel:{oid}]",
+                    )
                 self._persist_orchestration(
                     oid, goal, result.tasks, workspace_dir, auto_plan,
                     state="completed", result=result,
@@ -7807,6 +7876,10 @@ class GatewayServer:
 
             async def _drive() -> None:
                 try:
+                    if git_enabled and seed_files_raw:
+                        await self._git_commit_workspace(
+                            workspace_dir, f"Seed files: {goal[:60]}",
+                        )
                     run_tasks = job["tasks"]
                     if auto_plan:
                         run_tasks = await orch.plan(
@@ -7822,6 +7895,19 @@ class GatewayServer:
                         repair=repair_raw,
                         verify=verify_all_raw,
                     )
+                    # Commit BEFORE flipping state: a client that sees
+                    # "completed" must find the result commit in the
+                    # log, not race it.
+                    if git_enabled:
+                        result = job["result"]
+                        achieved = (
+                            "achieved" if result.goal_achieved
+                            else "completed" if result.success else "partial"
+                        )
+                        await self._git_commit_workspace(
+                            workspace_dir,
+                            f"{achieved}: {goal[:60]} [towel:{oid}]",
+                        )
                     job["state"] = "completed"
                 except asyncio.CancelledError:
                     job["state"] = "cancelled"
@@ -8085,6 +8171,94 @@ class GatewayServer:
                 },
             )
 
+        async def api_orchestrate_git_log(request: Request) -> JSONResponse:
+            """GET /api/orchestrate/<id>/git/log — the project's commit
+            history: every run of this workspace is a commit, so this
+            is the 'personal GitHub' timeline for the project."""
+            oid = request.path_params["oid"]
+            workspace = _orch_workspace(oid)
+            if not workspace:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r} or no workspace"},
+                    status_code=404,
+                )
+            from pathlib import Path as _Path
+            if not (_Path(workspace) / ".git").is_dir():
+                return JSONResponse(
+                    {"error": "workspace has no git history"}, status_code=404,
+                )
+            try:
+                rc, out = await self._run_git(
+                    workspace, "log", "-50", "--no-color",
+                    "--format=%h%x1f%cI%x1f%s%x1e",
+                )
+            except FileNotFoundError:
+                return JSONResponse(
+                    {"error": "git is not installed on the coordinator"},
+                    status_code=501,
+                )
+            if rc != 0:
+                return JSONResponse(
+                    {"error": f"git log failed: {out[:200]}"}, status_code=500,
+                )
+            commits = []
+            for entry in out.split("\x1e"):
+                entry = entry.strip()
+                if not entry:
+                    continue
+                parts = entry.split("\x1f")
+                if len(parts) != 3:
+                    continue
+                commits.append({
+                    "sha": parts[0],
+                    "date": parts[1],
+                    "message": parts[2],
+                })
+            return JSONResponse({
+                "orchestration_id": oid,
+                "workspace_dir": workspace,
+                "commits": commits,
+            })
+
+        async def api_orchestrate_git_diff(request: Request):
+            """GET /api/orchestrate/<id>/git/diff/<sha> — one commit's
+            patch as plain text, for the web diff viewer and external
+            tooling."""
+            import re as _re
+            oid = request.path_params["oid"]
+            sha = request.path_params["sha"]
+            if not _re.fullmatch(r"[0-9a-f]{4,40}", sha):
+                return JSONResponse(
+                    {"error": "sha must be 4-40 hex characters"},
+                    status_code=400,
+                )
+            workspace = _orch_workspace(oid)
+            if not workspace:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r} or no workspace"},
+                    status_code=404,
+                )
+            from pathlib import Path as _Path
+            if not (_Path(workspace) / ".git").is_dir():
+                return JSONResponse(
+                    {"error": "workspace has no git history"}, status_code=404,
+                )
+            try:
+                rc, out = await self._run_git(
+                    workspace, "show", "--no-color", sha,
+                )
+            except FileNotFoundError:
+                return JSONResponse(
+                    {"error": "git is not installed on the coordinator"},
+                    status_code=501,
+                )
+            if rc != 0:
+                return JSONResponse(
+                    {"error": f"unknown commit {sha!r}"}, status_code=404,
+                )
+            from starlette.responses import PlainTextResponse
+            return PlainTextResponse(out)
+
         async def api_orchestrate_file(request: Request):
             """GET /api/orchestrate/<id>/files/<path> — raw contents of
             one produced file, for the web viewer and for external
@@ -8315,6 +8489,16 @@ class GatewayServer:
             Route(
                 "/api/orchestrate/{oid}/archive",
                 api_orchestrate_archive,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/git/log",
+                api_orchestrate_git_log,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/git/diff/{sha}",
+                api_orchestrate_git_diff,
                 methods=["GET"],
             ),
             Route(
