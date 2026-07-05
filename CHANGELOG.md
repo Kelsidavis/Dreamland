@@ -68,6 +68,11 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **`git clone` from the coordinator**: smart-HTTP support at
+  `http://coordinator:PORT/git/<id>` — read-only (upload-pack only, no
+  push), gzip request bodies handled, refused for non-git workspaces.
+  The history view shows the ready-to-copy clone command. Verified
+  with a real `git clone` end-to-end (pinned by a uvicorn-backed test).
 - **Git-backed project history**: managed workspaces are git repos —
   seed files commit as "Seed files: <goal>", each finished run commits
   as "achieved/completed/partial: <goal> [towel:<id>]", so the project

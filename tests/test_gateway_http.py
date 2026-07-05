@@ -6083,3 +6083,94 @@ class TestGitHistory:
         assert client.get(
             f"/api/orchestrate/{oid}/git/diff/deadbeef"
         ).status_code == 404
+
+
+class TestGitSmartHTTP:
+    """`git clone http://coordinator/git/<id>` — smart-HTTP protocol,
+    read-only (upload-pack only, no receive-pack)."""
+
+    def _make_project(self, gateway, client):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nCLONED = True\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "clone me",
+            "files": {"mod.py": "CLONED = False\n"},
+            "tasks": [{"role": "coder", "prompt": "x", "extract_to": "mod.py"}],
+        })
+        assert resp.status_code == 200
+        return resp.json()["orchestration_id"]
+
+    def test_info_refs_advertisement(self, gateway, client):
+        oid = self._make_project(gateway, client)
+        resp = client.get(f"/git/{oid}/info/refs?service=git-upload-pack")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == (
+            "application/x-git-upload-pack-advertisement"
+        )
+        body = resp.content
+        # pkt-line service header, flush-pkt, then refs.
+        assert body.startswith(b"001e# service=git-upload-pack\n0000")
+        assert b"refs/heads/" in body
+
+    def test_only_upload_pack_service(self, gateway, client):
+        oid = self._make_project(gateway, client)
+        resp = client.get(f"/git/{oid}/info/refs?service=git-receive-pack")
+        assert resp.status_code == 403
+        # No service param (dumb protocol) is refused too.
+        assert client.get(f"/git/{oid}/info/refs").status_code == 403
+
+    def test_unknown_project_404(self, client):
+        assert client.get(
+            "/git/nope/info/refs?service=git-upload-pack"
+        ).status_code == 404
+
+    def test_real_git_clone_end_to_end(self, gateway, client, tmp_path):
+        """The genuine article: uvicorn serves the app on a loopback
+        port and the system git client clones the project."""
+        import socket
+        import subprocess
+        import threading
+        import time as _time
+
+        import uvicorn
+
+        oid = self._make_project(gateway, client)
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        server = uvicorn.Server(uvicorn.Config(
+            gateway._build_http_app(),
+            host="127.0.0.1", port=port, log_level="error",
+        ))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        deadline = _time.monotonic() + 10
+        while not server.started and _time.monotonic() < deadline:
+            _time.sleep(0.05)
+        assert server.started
+
+        try:
+            dest = tmp_path / "cloned"
+            result = subprocess.run(
+                ["git", "clone", "-q",
+                 f"http://127.0.0.1:{port}/git/{oid}", str(dest)],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            assert (dest / "mod.py").read_text() == "CLONED = True\n"
+            log = subprocess.run(
+                ["git", "-C", str(dest), "log", "--format=%s"],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert "towel:" in log.stdout
+            assert "Seed files:" in log.stdout
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)

@@ -8217,6 +8217,7 @@ class GatewayServer:
             return JSONResponse({
                 "orchestration_id": oid,
                 "workspace_dir": workspace,
+                "clone_path": f"/git/{oid}",
                 "commits": commits,
             })
 
@@ -8258,6 +8259,110 @@ class GatewayServer:
                 )
             from starlette.responses import PlainTextResponse
             return PlainTextResponse(out)
+
+        def _git_repo_for(oid: str):
+            """Resolve an orchestration id to its git-enabled workspace
+            path, or None. Shared by the smart-HTTP endpoints."""
+            workspace = _orch_workspace(oid)
+            if not workspace:
+                return None
+            from pathlib import Path as _Path
+            if not (_Path(workspace) / ".git").is_dir():
+                return None
+            return workspace
+
+        async def git_info_refs(request: Request):
+            """GET /git/<id>/info/refs — smart-HTTP ref advertisement,
+            the first half of `git clone http://coordinator/git/<id>`.
+
+            Read-only: only git-upload-pack (clone/fetch) is served;
+            there is no receive-pack, so the coordinator's history
+            can't be pushed over.
+            """
+            oid = request.path_params["oid"]
+            service = request.query_params.get("service")
+            if service != "git-upload-pack":
+                return JSONResponse(
+                    {"error": "only git-upload-pack is supported (read-only)"},
+                    status_code=403,
+                )
+            workspace = _git_repo_for(oid)
+            if workspace is None:
+                return JSONResponse(
+                    {"error": f"no git project for id {oid!r}"},
+                    status_code=404,
+                )
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "upload-pack", "--stateless-rpc",
+                    "--advertise-refs", workspace,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                out, err = await proc.communicate()
+            except FileNotFoundError:
+                return JSONResponse(
+                    {"error": "git is not installed on the coordinator"},
+                    status_code=501,
+                )
+            if proc.returncode != 0:
+                return JSONResponse(
+                    {"error": f"upload-pack failed: {err.decode(errors='replace')[:200]}"},
+                    status_code=500,
+                )
+            header = b"# service=git-upload-pack\n"
+            pkt = f"{len(header) + 4:04x}".encode() + header
+            from starlette.responses import Response as _Response
+            return _Response(
+                pkt + b"0000" + out,
+                media_type="application/x-git-upload-pack-advertisement",
+                headers={"Cache-Control": "no-cache"},
+            )
+
+        async def git_upload_pack(request: Request):
+            """POST /git/<id>/git-upload-pack — the pack exchange half
+            of a smart-HTTP clone/fetch."""
+            oid = request.path_params["oid"]
+            workspace = _git_repo_for(oid)
+            if workspace is None:
+                return JSONResponse(
+                    {"error": f"no git project for id {oid!r}"},
+                    status_code=404,
+                )
+            body = await request.body()
+            # git clients gzip request bodies past a threshold.
+            if request.headers.get("content-encoding") == "gzip":
+                import gzip
+                try:
+                    body = gzip.decompress(body)
+                except OSError:
+                    return JSONResponse(
+                        {"error": "bad gzip body"}, status_code=400,
+                    )
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "upload-pack", "--stateless-rpc", workspace,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                out, err = await proc.communicate(input=body)
+            except FileNotFoundError:
+                return JSONResponse(
+                    {"error": "git is not installed on the coordinator"},
+                    status_code=501,
+                )
+            if proc.returncode != 0:
+                return JSONResponse(
+                    {"error": f"upload-pack failed: {err.decode(errors='replace')[:200]}"},
+                    status_code=500,
+                )
+            from starlette.responses import Response as _Response
+            return _Response(
+                out,
+                media_type="application/x-git-upload-pack-result",
+                headers={"Cache-Control": "no-cache"},
+            )
 
         async def api_orchestrate_file(request: Request):
             """GET /api/orchestrate/<id>/files/<path> — raw contents of
@@ -8495,6 +8600,16 @@ class GatewayServer:
                 "/api/orchestrate/{oid}/git/log",
                 api_orchestrate_git_log,
                 methods=["GET"],
+            ),
+            Route(
+                "/git/{oid}/info/refs",
+                git_info_refs,
+                methods=["GET"],
+            ),
+            Route(
+                "/git/{oid}/git-upload-pack",
+                git_upload_pack,
+                methods=["POST"],
             ),
             Route(
                 "/api/orchestrate/{oid}/git/diff/{sha}",

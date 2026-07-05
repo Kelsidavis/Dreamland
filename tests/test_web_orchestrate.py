@@ -156,3 +156,9 @@ class TestGitHistoryUI:
         # Diff content is model-generated code rendered via innerHTML —
         # every line must pass through the escaper.
         assert "const esc = orchEsc(line);" in HTML
+
+
+class TestCloneCommand:
+    def test_history_shows_clone_command(self):
+        assert "git clone " in HTML
+        assert "clone_path" in HTML

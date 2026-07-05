@@ -1579,7 +1579,10 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       return;
     }
     const commits = data.commits || [];
-    listEl.innerHTML = commits.map(function(c) {
+    const cloneCmd = 'git clone ' + apiBase + (data.clone_path || ('/git/' + id));
+    listEl.innerHTML = '<div class="fleet-card" style="padding:6px 10px;' +
+      'font-family:var(--mono);font-size:10px;color:var(--text-dim)">' +
+      orchEsc(cloneCmd) + '</div>' + commits.map(function(c) {
       return '<div class="fleet-card orch-commit-row" data-sha="' +
         orchEsc(c.sha) + '" style="padding:6px 10px;cursor:pointer;' +
         'font-family:var(--mono);font-size:11px">' +
