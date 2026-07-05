@@ -324,3 +324,70 @@ class TestAttach:
             ])
         assert result.exit_code != 0
         assert "Unknown orchestration id" in result.output
+
+
+class TestPull:
+    def _zip_bytes(self, entries: dict) -> bytes:
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, body in entries.items():
+                zf.writestr(name, body)
+        return buf.getvalue()
+
+    def test_pull_unpacks_archive(self, tmp_path) -> None:
+        runner = CliRunner()
+        payload = self._zip_bytes({
+            "calc.py": "X = 1\n",
+            "pkg/main.py": "print('hi')\n",
+        })
+
+        class _Resp:
+            status_code = 200
+            content = payload
+            text = ""
+
+        with patch("httpx.get", return_value=_Resp()):
+            result = runner.invoke(cli, [
+                "pull", "abc123", str(tmp_path / "out"),
+            ])
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "out" / "calc.py").read_text() == "X = 1\n"
+        assert (tmp_path / "out" / "pkg" / "main.py").read_text() == "print('hi')\n"
+        assert "2 file(s)" in result.output
+
+    def test_pull_rejects_zip_slip(self, tmp_path) -> None:
+        runner = CliRunner()
+        payload = self._zip_bytes({
+            "../evil.py": "pwned\n",
+            "ok.py": "fine\n",
+        })
+
+        class _Resp:
+            status_code = 200
+            content = payload
+            text = ""
+
+        with patch("httpx.get", return_value=_Resp()):
+            result = runner.invoke(cli, [
+                "pull", "abc123", str(tmp_path / "out"),
+            ])
+        assert result.exit_code == 0, result.output
+        assert not (tmp_path / "evil.py").exists()
+        assert (tmp_path / "out" / "ok.py").exists()
+        assert "unsafe entry" in result.output
+
+    def test_pull_unknown_id_exits_nonzero(self, tmp_path) -> None:
+        runner = CliRunner()
+
+        class _Resp:
+            status_code = 404
+            content = b""
+            text = '{"error": "unknown"}'
+
+        with patch("httpx.get", return_value=_Resp()):
+            result = runner.invoke(cli, [
+                "pull", "nope", str(tmp_path / "out"),
+            ])
+        assert result.exit_code != 0

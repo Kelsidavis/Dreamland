@@ -2378,7 +2378,7 @@ def orchestrations(limit: int, as_json: bool) -> None:
         sys.exit(1)
     data = resp.json()
     if as_json:
-        console.print(json_mod.dumps(data, indent=2))
+        print(json_mod.dumps(data, indent=2))
         return
     runs = data.get("orchestrations", [])
     if not runs:
@@ -2404,6 +2404,65 @@ def orchestrations(limit: int, as_json: bool) -> None:
             f"{r.get('orchestration_id', '')}  "
             f"{(r.get('goal') or '')[:70]}"
         )
+
+
+@cli.command()
+@click.argument("orchestration_id")
+@click.argument(
+    "dest", required=False,
+    type=click.Path(file_okay=False),
+)
+def pull(orchestration_id: str, dest: str | None) -> None:
+    """Download an orchestration's project files to a local directory.
+
+    Fetches the run's workspace archive from the coordinator and
+    unpacks it — the one-command way to grab a fleet build from any
+    machine. DEST defaults to ./towel-<id>/.
+    """
+    import io
+    import zipfile
+    from pathlib import Path as _Path
+
+    import httpx
+
+    config = TowelConfig.load()
+    url = (
+        f"http://{config.gateway.host}:{config.gateway.port + 1}"
+        f"/api/orchestrate/{orchestration_id}/archive"
+    )
+    try:
+        resp = httpx.get(url, timeout=120)
+    except httpx.RequestError as exc:
+        console.print(f"[red]Gateway request failed:[/red] {exc}")
+        console.print("Is the gateway running? Try: towel serve")
+        sys.exit(1)
+    if resp.status_code != 200:
+        console.print(f"[red]Gateway returned {resp.status_code}:[/red] {resp.text}")
+        sys.exit(1)
+
+    target = _Path(dest or f"towel-{orchestration_id}").resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            # Zip-slip guard: entries must resolve inside DEST. Our own
+            # coordinator builds clean archives, but pull may point at
+            # any towel instance.
+            out = (target / info.filename).resolve()
+            if target != out and target not in out.parents:
+                console.print(
+                    f"[yellow]skipping unsafe entry:[/yellow] {info.filename}"
+                )
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(zf.read(info))
+            console.print(f"  [green]✓[/green] {info.filename}")
+            written += 1
+    console.print(
+        f"[green]{written} file(s)[/green] pulled to [bold]{target}[/bold]"
+    )
 
 
 def _watch_orchestrate(url: str, body: dict[str, Any], as_json: bool) -> None:
@@ -2497,7 +2556,7 @@ def _render_orchestration(data: dict[str, Any], as_json: bool) -> None:
     import json as json_mod
 
     if as_json:
-        console.print(json_mod.dumps(data, indent=2))
+        print(json_mod.dumps(data, indent=2))
         return
 
     total_ms = data.get("total_elapsed_ms", 0.0)

@@ -101,3 +101,11 @@ class TestChatSessionResume:
 
     def test_reconnect_does_not_reclobber_transcript(self):
         assert "Reconnects skip this" in HTML
+
+
+class TestArchiveDownload:
+    def test_download_button_exists(self):
+        assert "orch-download-btn" in HTML
+
+    def test_uses_archive_endpoint(self):
+        assert "/archive" in HTML

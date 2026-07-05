@@ -68,6 +68,12 @@ on a two-worker MLX fleet:
   tasks are told to call write_file. The old one-size directive primed
   no-tools workers to emit filesystem scaffolding instead of the
   requested code (observed live twice).
+- **One-command project pulls**: `GET /api/orchestrate/<id>/archive`
+  serves the whole workspace as a zip (same filters as the listing,
+  200MB cap); the web explorer gains a "↓ zip" download button; new
+  `towel pull <id> [dest]` downloads and unpacks a build on any
+  machine (zip-slip guarded). `--json` CLI outputs now print plain
+  (Rich's wrapping corrupted them for scripts).
 - **File explorer / artifact pulling**: `GET /api/orchestrate/<id>/files`
   lists a run's project files, `…/files/<path>` serves raw contents —
   scoped to coordinator-recorded workspaces with traversal guards, so

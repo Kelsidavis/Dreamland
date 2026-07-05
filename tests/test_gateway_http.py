@@ -5863,3 +5863,65 @@ class TestLocalPlanner:
                 with_tools=False, task_type="generate",
                 exclude_workers=None,
             ))
+
+
+class TestOrchestrateArchive:
+    """One-request project pull: GET /api/orchestrate/<id>/archive
+    returns the workspace as a zip with the listing's filters."""
+
+    def _run(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "```python\nprint('zipped')\n```"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        resp = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "ws"),
+            "tasks": [{"role": "coder", "prompt": "x",
+                       "extract_to": "pkg/app.py"}],
+        })
+        assert resp.status_code == 200
+        return resp.json()["orchestration_id"]
+
+    def test_archive_contains_project_files_only(self, gateway, client, tmp_path):
+        import io
+        import zipfile
+
+        oid = self._run(gateway, client, tmp_path)
+        (tmp_path / "ws" / "README.md").write_text("# p\n")
+        (tmp_path / "ws" / ".env").write_text("SECRET=1")
+        (tmp_path / "ws" / "__pycache__").mkdir()
+        (tmp_path / "ws" / "__pycache__" / "x.pyc").write_bytes(b"x")
+
+        resp = client.get(f"/api/orchestrate/{oid}/archive")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/zip"
+        assert f"towel-{oid}.zip" in resp.headers["content-disposition"]
+        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        names = zf.namelist()
+        assert "pkg/app.py" in names
+        assert "README.md" in names
+        assert ".env" not in names
+        assert not any("__pycache__" in n for n in names)
+        assert zf.read("pkg/app.py") == b"print('zipped')\n"
+
+    def test_archive_unknown_id_404(self, client):
+        assert client.get("/api/orchestrate/nope/archive").status_code == 404
+
+    def test_archive_empty_workspace_404(self, gateway, client, tmp_path):
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            return "no files produced"
+
+        gateway.dispatch_role_task = fake_dispatch  # type: ignore[method-assign]
+        oid = client.post("/api/orchestrate", json={
+            "goal": "g",
+            "workspace_dir": str(tmp_path / "empty-ws"),
+            "tasks": [{"role": "writer", "prompt": "x"}],
+        }).json()["orchestration_id"]
+        assert client.get(f"/api/orchestrate/{oid}/archive").status_code == 404

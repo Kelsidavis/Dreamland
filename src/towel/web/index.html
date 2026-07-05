@@ -490,6 +490,8 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
             </select>
             <button class="tb-btn" id="orch-files-btn"
                     title="Browse the project files this run produced">files</button>
+            <button class="tb-btn" id="orch-download-btn"
+                    title="Download the whole workspace as a zip">↓ zip</button>
           </div>
           <div class="fleet-list" id="orch-files-list" style="margin-top:8px"></div>
           <div id="orch-file-head" style="display:none;font-family:var(--mono);
@@ -2471,6 +2473,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
+  document.getElementById('orch-download-btn').addEventListener('click',function(){
+    const id = orchFileTargetId();
+    if (!id) { alert('No run selected — start an orchestration or pick a past run.'); return; }
+    // Navigating (not fetching) so the browser handles the attachment.
+    window.location.href = apiBase + '/api/orchestrate/' +
+      encodeURIComponent(id) + '/archive';
+  });
   document.getElementById('orch-history-select').addEventListener('change',function(){
     const id = this.value;
     if (id) { orchStop(); orchAttach(id); }

@@ -7960,6 +7960,67 @@ class GatewayServer:
                 "truncated": truncated,
             })
 
+        async def api_orchestrate_archive(request: Request):
+            """GET /api/orchestrate/<id>/archive — the whole workspace
+            as a zip, for one-request project pulls from other systems
+            (and the web UI's download button).
+
+            Same scope and filters as the file listing: only the run's
+            recorded workspace, hidden files and __pycache__ skipped.
+            Built in memory — workspaces are build artifacts, and the
+            200MB cap refuses anything dataset-sized.
+            """
+            oid = request.path_params["oid"]
+            workspace = _orch_workspace(oid)
+            if not workspace:
+                return JSONResponse(
+                    {"error": f"unknown orchestration id {oid!r} or no workspace"},
+                    status_code=404,
+                )
+            from pathlib import Path as _Path
+            root = _Path(workspace)
+            if not root.is_dir():
+                return JSONResponse(
+                    {"error": f"workspace {workspace} no longer exists"},
+                    status_code=404,
+                )
+            import io
+            import zipfile
+            buf = io.BytesIO()
+            total = 0
+            added = 0
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in sorted(root.rglob("*")):
+                    if not p.is_file():
+                        continue
+                    rel = p.relative_to(root)
+                    if any(
+                        part.startswith(".") or part == "__pycache__"
+                        for part in rel.parts
+                    ):
+                        continue
+                    total += p.stat().st_size
+                    if total > 200 * 1024 * 1024:
+                        return JSONResponse(
+                            {"error": "workspace exceeds the 200MB archive cap"},
+                            status_code=413,
+                        )
+                    zf.write(p, arcname=str(rel))
+                    added += 1
+            if added == 0:
+                return JSONResponse(
+                    {"error": "workspace has no files"}, status_code=404,
+                )
+            from starlette.responses import Response as _Response
+            return _Response(
+                buf.getvalue(),
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition":
+                        f'attachment; filename="towel-{oid}.zip"',
+                },
+            )
+
         async def api_orchestrate_file(request: Request):
             """GET /api/orchestrate/<id>/files/<path> — raw contents of
             one produced file, for the web viewer and for external
@@ -8185,6 +8246,11 @@ class GatewayServer:
             Route(
                 "/api/orchestrate/{oid}/files",
                 api_orchestrate_files,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/archive",
+                api_orchestrate_archive,
                 methods=["GET"],
             ),
             Route(
