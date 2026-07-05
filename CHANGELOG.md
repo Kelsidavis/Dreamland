@@ -38,6 +38,11 @@ on a two-worker MLX fleet:
   machine or before a reload resumes showing live progress instead of
   a blank panel); the recent-runs picker loads any run's full status;
   `towel orchestrate --attach <id>` does the same from the CLI.
+- **Chat transcripts restore too**: fixed a localStorage guard that
+  skipped transcript restore on every page reload after the first
+  (users saw a welcome screen over their existing conversation), and
+  a fresh browser now adopts the most recent server conversation
+  instead of opening a blank session — chat carries across machines.
 - **Persistent history**: every run (sync and background) is recorded
   to `~/.towel/orchestrations.json` (newest 100 kept); records survive
   coordinator restarts, in-flight runs get marked `interrupted`.

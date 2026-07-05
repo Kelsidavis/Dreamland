@@ -649,9 +649,36 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   applyTheme(currentTheme);
 
   // ── Session ──
-  let sessionId = localStorage.getItem('towel-session') || newSessionId();
+  const storedSession = localStorage.getItem('towel-session');
+  let sessionId = storedSession || newSessionId();
   function newSessionId() { return 'webchat-' + Math.random().toString(36).slice(2, 10); }
   function saveSession() { localStorage.setItem('towel-session', sessionId); }
+
+  // Restore the working conversation on page load. The server owns
+  // conversation state; localStorage only remembers which one THIS
+  // browser was in. Two cases need server help:
+  //   - fresh machine/browser: no stored id — adopt the most recent
+  //     server conversation instead of opening a blank new session
+  //     (work started on another machine carries over).
+  //   - stale stored id: its conversation was deleted — same fallback.
+  // Page-scoped flag, NOT localStorage: ws.onopen fires on every
+  // network reconnect, and re-rendering the transcript mid-stream
+  // would clobber the live view. (A previous localStorage guard here
+  // skipped transcript restore on every page RELOAD — users saw a
+  // welcome screen over their existing conversation.)
+  let transcriptRestored = false;
+  async function resumeSession() {
+    try {
+      const data = await apiGet('/conversations?limit=100');
+      allConversations = data.conversations || [];
+      const known = allConversations.some(function(c) { return c.id === sessionId; });
+      if ((!storedSession || !known) && allConversations.length) {
+        sessionId = allConversations[0].id;   // most recent first
+        saveSession();
+      }
+    } catch (e) { /* server list unavailable — keep local id */ }
+    await switchSession(sessionId);
+  }
 
   function updateSessionInfo() {
     const conv = allConversations.find(c => c.id === sessionId);
@@ -1708,10 +1735,14 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
       statusText.textContent = 'connected';
       reconnectDelay = 1000;
       ws.send(JSON.stringify({ type: 'register', id: 'channel:webchat:' + sessionId }));
-      loadConversationList();
-      if (sessionId !== localStorage.getItem('towel-session-loaded')) {
-        switchSession(sessionId);
-        localStorage.setItem('towel-session-loaded', sessionId);
+      if (!transcriptRestored) {
+        // First connect this page-load: restore the working
+        // conversation (cross-machine aware). Reconnects skip this so
+        // a network blip can't clobber a streaming transcript.
+        transcriptRestored = true;
+        resumeSession();
+      } else {
+        loadConversationList();
       }
     };
     ws.onclose = function() {

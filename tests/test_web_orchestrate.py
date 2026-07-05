@@ -79,3 +79,25 @@ class TestResumeAcrossMachines:
         # Selecting a past run attaches to it (status + tasks), not
         # just the file browser.
         assert "orchStop(); orchAttach(id);" in HTML
+
+
+class TestChatSessionResume:
+    """Chat transcripts must restore on page load and carry across
+    machines: the server owns conversations, localStorage only recalls
+    which one THIS browser was in."""
+
+    def test_resume_session_exists(self):
+        assert "resumeSession" in HTML
+        assert "transcriptRestored" in HTML
+
+    def test_fresh_browser_adopts_latest_server_conversation(self):
+        assert "allConversations[0].id" in HTML
+
+    def test_no_persistent_loaded_guard(self):
+        # The old localStorage guard skipped transcript restore on
+        # every reload after the first — users saw a welcome screen
+        # over their existing conversation.
+        assert "towel-session-loaded" not in HTML
+
+    def test_reconnect_does_not_reclobber_transcript(self):
+        assert "Reconnects skip this" in HTML
