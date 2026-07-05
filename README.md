@@ -281,7 +281,8 @@ towel orchestrate \
   every finished run land as commits. `GET /api/orchestrate/<id>/git/log`
   and `…/git/diff/<sha>` serve the timeline, and the web explorer's
   "history" button renders it with a colored diff viewer — a personal
-  GitHub-style view of what the fleet changed, run by run.
+  GitHub-style view of what the fleet changed, run by run. Or just
+  `git clone http://coordinator:18743/git/<id>` (read-only smart HTTP).
 
 Hand-authored plans still work: `towel orchestrate plan.json` or
 repeated `--task "role:prompt@deps+tools"` specs.
