@@ -170,3 +170,20 @@ class TestProjectContinueUI:
 
     def test_sends_project_when_checked(self):
         assert "body.project = sel" in HTML
+
+
+class TestDreamlandTheme:
+    def test_dreamland_is_default_theme(self):
+        assert 'data-theme="dreamland"' in HTML
+        assert "'dreamland', 'deep-space', 'frost', 'matrix', 'solarized'" in HTML
+
+    def test_theme_palette_defined(self):
+        assert '[data-theme="dreamland"]' in HTML
+        assert "--hazard" in HTML
+
+    def test_welcome_hero_elements(self):
+        for marker in ("RESTRICTED AREA", "saucer", "stars", "radar-ping"):
+            assert marker in HTML, marker
+
+    def test_favicon_present(self):
+        assert 'rel="icon"' in HTML

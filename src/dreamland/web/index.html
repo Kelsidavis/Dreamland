@@ -1,11 +1,24 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="deep-space">
+<html lang="en" data-theme="dreamland">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dreamland — It doesn't exist.</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%2307090f"/><ellipse cx="16" cy="17" rx="11" ry="4" fill="%234ce07a"/><path d="M10 15a6 5 0 0 1 12 0z" fill="%235ad0e6"/><circle cx="16" cy="26" r="1.4" fill="%23f0b23c"/></svg>'>
 <style>
-/* ── Theme: Deep Space (default dark) ── */
+/* ── Theme: Dreamland (default — night desert, radar phosphor, warning amber) ── */
+[data-theme="dreamland"] {
+  --bg: #07090f; --bg-surface: #0b0f17; --bg-input: #090c13;
+  --bg-hover: #111624; --bg-active: #161e33; --border: #1b2333;
+  --text: #c9d2e0; --text-dim: #5d6b80;
+  --green: #4ce07a; --green-dim: #2e9153;
+  --cyan: #5ad0e6; --yellow: #f0b23c; --red: #e05561;
+  --user-avatar-bg: #16243d; --asst-avatar-bg: #12301e;
+  --hazard: repeating-linear-gradient(-45deg,
+      rgba(240,178,60,.55) 0 8px, rgba(0,0,0,0) 8px 16px);
+  --glow: 0 0 18px rgba(76,224,122,.25);
+}
+/* ── Theme: Deep Space ── */
 [data-theme="deep-space"] {
   --bg: #0a0e14; --bg-surface: #111820; --bg-input: #0d1117;
   --bg-hover: #161e28; --bg-active: #1a2535; --border: #1e2a3a;
@@ -42,11 +55,21 @@
   --user-avatar-bg: #0a3a4a; --asst-avatar-bg: #1a3a2a;
 }
 
+:root { --hazard: none; --glow: none; }
 :root { --sidebar-w: 280px;
   --mono: 'SF Mono','Cascadia Code','Fira Code','Consolas',monospace;
   --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
+input:focus, textarea:focus, select:focus { outline:none;
+  border-color: var(--green-dim) !important;
+  box-shadow: 0 0 0 2px rgba(76,224,122,.12); }
+button:hover { border-color: var(--green-dim); }
+::-webkit-scrollbar { width:9px; height:9px; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px;
+  border:2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background:var(--text-dim); }
+::-webkit-scrollbar-track { background:transparent; }
 body { font-family:var(--sans); background:var(--bg); color:var(--text);
   height:100vh; display:flex; overflow:hidden; transition: background .3s, color .3s; }
 
@@ -55,8 +78,16 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
 #sidebar-header { padding:14px 16px; border-bottom:1px solid var(--border);
   display:flex; align-items:center; justify-content:space-between; }
-#sidebar-header h1 { font-family:var(--mono); font-size:16px;
-  font-weight:700; color:var(--green); letter-spacing:1px; }
+#sidebar-header h1 { font-family:var(--mono); font-size:15px;
+  font-weight:700; color:var(--green); letter-spacing:.22em;
+  text-shadow: var(--glow); display:flex; align-items:center; gap:8px; }
+#sidebar-header h1 .glyph { color:var(--yellow); font-size:11px;
+  text-shadow:none; letter-spacing:0; transform:translateY(-1px); }
+/* Hazard hairline under the header — the gate to the restricted area. */
+#sidebar-header { position:relative; }
+#sidebar-header::after { content:""; position:absolute; left:0; right:0;
+  bottom:-1px; height:3px; background:var(--hazard); opacity:.5;
+  pointer-events:none; }
 #new-chat-btn { background:none; border:1px solid var(--border); color:var(--text);
   border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer;
   font-family:var(--mono); transition:border-color .2s,color .2s; }
@@ -85,7 +116,13 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   font-size:11px; color:var(--text-dim); font-family:var(--mono); }
 #status-dot { width:7px; height:7px; border-radius:50%;
   background:var(--red); display:inline-block; transition:background .3s; }
-#status-dot.connected { background:var(--green); }
+#status-dot.connected { background:var(--green);
+  animation: radar-ping 2.4s ease-out infinite; }
+@keyframes radar-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(76,224,122,.45); }
+  70%  { box-shadow: 0 0 0 7px rgba(76,224,122,0); }
+  100% { box-shadow: 0 0 0 0 rgba(76,224,122,0); }
+}
 #theme-btn { background:none; border:1px solid var(--border); color:var(--text-dim);
   border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer;
   font-family:var(--mono); transition:border-color .2s,color .2s; }
@@ -233,9 +270,28 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
 .md-content th { background:var(--bg-surface); font-weight:600; }
 
 /* Welcome */
-#welcome { max-width:500px; margin:0 auto; text-align:center; padding-top:15vh; }
-#welcome h2 { font-family:var(--mono); color:var(--green); font-size:32px; margin-bottom:8px; }
-#welcome .motto { color:var(--text-dim); font-size:16px; margin-bottom:32px; }
+#welcome { max-width:520px; margin:0 auto; text-align:center; padding-top:14vh;
+  position:relative; }
+#welcome .stars { position:absolute; inset:-40px 0 auto 0; height:220px;
+  pointer-events:none; opacity:.7; }
+#welcome .stars i { position:absolute; width:2px; height:2px; border-radius:50%;
+  background:var(--text-dim); animation: twinkle 4s ease-in-out infinite; }
+#welcome .stars i:nth-child(2n) { animation-delay: 1.3s; }
+#welcome .stars i:nth-child(3n) { animation-delay: 2.6s; width:1px; height:1px; }
+@keyframes twinkle { 0%,100% { opacity:.25; } 50% { opacity:.95; } }
+#welcome .saucer { font-family:var(--mono); color:var(--cyan); font-size:12px;
+  line-height:1.25; margin-bottom:14px; opacity:.85; white-space:pre; }
+#welcome h2 { font-family:var(--mono); color:var(--green); font-size:34px;
+  letter-spacing:.28em; margin-bottom:10px; text-shadow: var(--glow); }
+#welcome .motto { color:var(--text-dim); font-size:15px; font-style:italic;
+  margin-bottom:26px; }
+#welcome .sign { display:inline-block; font-family:var(--mono); font-size:10.5px;
+  letter-spacing:.14em; color:var(--yellow); border:1px solid var(--yellow);
+  border-radius:4px; padding:7px 14px; margin-bottom:30px; opacity:.85;
+  position:relative; }
+#welcome .sign::before, #welcome .sign::after { content:""; position:absolute;
+  left:6px; right:6px; height:2px; background:var(--hazard); opacity:.6; }
+#welcome .sign::before { top:-1px; } #welcome .sign::after { bottom:-1px; }
 #welcome .hint { color:var(--text-dim); font-size:13px; line-height:1.6; font-family:var(--mono); }
 
 /* Input */
@@ -383,7 +439,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
     <div id="fleet-header">
       <div id="fleet-title">
         <strong>FLEET CONTROL</strong>
-        <div id="fleet-subtitle">Manage workers, routes, and pins from the controller.</div>
+        <div id="fleet-subtitle">Groom Lake operations — workers, routes, and clearances.</div>
       </div>
       <div id="fleet-actions">
         <button class="tb-btn" id="fleet-launch-btn" title="Spawn a worker on a remote host running dreamland launcher">+ launch</button>
@@ -553,7 +609,7 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
 
 <div id="sidebar">
   <div id="sidebar-header">
-    <h1>DREAMLAND</h1>
+    <h1><span class="glyph">▲▲</span>DREAMLAND</h1>
     <button id="new-chat-btn">+ New</button>
   </div>
   <input id="conv-search" type="text" placeholder="Search conversations...">
@@ -647,8 +703,14 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   let fleetState = { workers: [], sessions: [], requirements: {}, pins: {}, workerStats: {}, coordinator: null };
 
   // ── Themes ──
-  const THEMES = ['deep-space', 'frost', 'matrix', 'solarized'];
-  let currentTheme = localStorage.getItem('dreamland-theme') || 'deep-space';
+  const THEMES = ['dreamland', 'deep-space', 'frost', 'matrix', 'solarized'];
+  let currentTheme = localStorage.getItem('dreamland-theme') || 'dreamland';
+  if (currentTheme === 'deep-space' && !localStorage.getItem('dreamland-theme-v2')) {
+    // One-time migration: deep-space was the pre-rename default, not a
+    // deliberate choice for most browsers — show the new house theme.
+    currentTheme = 'dreamland';
+  }
+  localStorage.setItem('dreamland-theme-v2', '1');
   function applyTheme(t) {
     currentTheme = t;
     document.documentElement.setAttribute('data-theme', t);
@@ -1782,9 +1844,21 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   }
 
   function showWelcome() {
+    // Star positions are fixed (no randomness) so the sky is calm
+    // across repaints; twinkle comes from staggered CSS animation.
+    const stars = [[4,12],[11,58],[7,83],[16,31],[2,44],[19,70],[9,22],
+                   [14,91],[5,66],[21,8],[12,40],[18,53],[3,96],[22,27]]
+      .map(([t,l]) => '<i style="top:' + (t * 8) + 'px;left:' + l + '%"></i>')
+      .join('');
     messagesEl.innerHTML = `<div id="welcome">
+      <div class="stars">${stars}</div>
+      <div class="saucer">     _____
+ ___/_____\___
+(_____________)
+   o  o  o</div>
       <h2>DREAMLAND</h2><p class="motto">It doesn't exist.</p>
-      <p class="hint">Your local-first AI assistant.<br>Type a message to begin.</p></div>`;
+      <div class="sign">⚠ RESTRICTED AREA · AUTHORIZED PERSONNEL ONLY</div>
+      <p class="hint">Your local-first AI build fleet.<br>Type a message to begin.</p></div>`;
   }
 
   // ── Markdown renderer ──

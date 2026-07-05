@@ -8,6 +8,13 @@ a glance whether a release affects you.
 
 ### Renamed: Towel → Dreamland (2026-07-05)
 
+The web UI got a matching visual identity: a new default **dreamland**
+theme (night-desert indigo, radar-phosphor green, warning-amber),
+hazard-stripe accents, a radar-blip connection pulse, a starfield
+welcome hero with an ASCII saucer and RESTRICTED AREA sign, saucer
+favicon, and focus/scrollbar polish. Previous themes remain available
+(theme button cycles through five).
+
 The project is now **Dreamland** (Area 51's radio callsign — the
 classified desert site where specialist crews quietly build things
 that officially don't exist). Continuity is preserved everywhere:
