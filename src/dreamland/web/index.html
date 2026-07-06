@@ -705,7 +705,17 @@ pre:hover .code-copy { opacity:1; }
           <button class="tb-btn" id="orch-start-btn" style="color:var(--green)">▸ start build</button>
           <button class="tb-btn" id="orch-cancel-btn" style="display:none;color:var(--red)">cancel</button>
         </div>
-        <h3>Projects</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <h3 style="margin-bottom:0">Projects</h3>
+          <select id="orch-sort" title="Sort projects"
+                  style="background:var(--bg-input);color:var(--text-dim);
+                         border:1px solid var(--border);border-radius:6px;
+                         font-family:var(--mono);font-size:10px;padding:3px 6px;
+                         cursor:pointer;margin-bottom:10px">
+            <option value="newest">newest</option>
+            <option value="running">running first</option>
+          </select>
+        </div>
         <div id="orch-runs-list"></div>
       </div>
       <div class="projects-col">
@@ -1903,6 +1913,7 @@ pre:hover .code-copy { opacity:1; }
   // use to pull build artifacts.
   let orchSelectedId = null;
   let orchRuns = [];
+  let orchSortMode = 'newest';  // 'newest' | 'running'
 
   let orchRunsLoaded = false;
 
@@ -1958,6 +1969,16 @@ pre:hover .code-copy { opacity:1; }
       '<div class="rc-meta">' + meta + '</div></div>';
   }
 
+  // Sort a project list by the chosen mode. "newest" is created_at desc;
+  // "running" floats live runs to the top, then newest within each tier.
+  function orchSortRuns(list) {
+    const byNew = function(a, b){ return (b.created_at || '').localeCompare(a.created_at || ''); };
+    const sorted = list.slice().sort(byNew);
+    if (orchSortMode !== 'running') return sorted;
+    const rank = function(r){ return r.state === 'running' ? 0 : 1; };
+    return sorted.sort(function(a, b){ return rank(a) - rank(b); });  // stable → keeps newest order within tier
+  }
+
   function orchRunsRender() {
     const listEl = document.getElementById('orch-runs-list');
     if (!orchRuns.length) {
@@ -1965,8 +1986,8 @@ pre:hover .code-copy { opacity:1; }
         'font-family:var(--mono)">No projects yet — start your first build above.</div>';
       return;
     }
-    const builds = orchRuns.filter(function(r){ return r.source !== 'chat'; });
-    const chats = orchRuns.filter(function(r){ return r.source === 'chat'; });
+    const builds = orchSortRuns(orchRuns.filter(function(r){ return r.source !== 'chat'; }));
+    const chats = orchSortRuns(orchRuns.filter(function(r){ return r.source === 'chat'; }));
     let html = '';
     if (builds.length) {
       const active = builds.filter(function(r){ return r.state === 'running'; }).length;
@@ -3120,6 +3141,10 @@ pre:hover .code-copy { opacity:1; }
   // immediately — poll once so the terminal-state handler auto-continues.
   document.getElementById('orch-caffeinate').addEventListener('change',function(){
     if (this.checked) { orchResetCaffeine(); if (orchId) orchPoll(); }
+  });
+  document.getElementById('orch-sort').addEventListener('change',function(){
+    orchSortMode = this.value;
+    orchRunsRender();
   });
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
   document.getElementById('orch-git-btn').addEventListener('click',orchGitLog);

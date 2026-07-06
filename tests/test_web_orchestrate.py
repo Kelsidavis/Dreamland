@@ -342,3 +342,12 @@ class TestProjectsPanelUX:
         assert "loading projects…" in HTML
         assert "No projects yet" in HTML
         assert "loading project…" in HTML  # per-project select feedback
+
+    def test_sort_control_present(self):
+        assert 'id="orch-sort"' in HTML
+        assert 'value="newest"' in HTML
+        assert 'value="running"' in HTML
+
+    def test_sort_logic_present(self):
+        assert "function orchSortRuns" in HTML
+        assert "orchSortMode" in HTML
