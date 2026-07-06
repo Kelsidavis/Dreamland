@@ -692,6 +692,11 @@ pre:hover .code-copy { opacity:1; }
           <button class="tb-btn" id="orch-continue-btn"
                   style="display:none;color:var(--green)"
                   title="Run another repair round toward the goal">▶ continue</button>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;
+                        color:var(--text-dim);cursor:pointer"
+                 title="Keep running repair rounds automatically until the goal is met (or it stops making progress)">
+            <input type="checkbox" id="orch-caffeinate"> ☕ caffeinate
+          </label>
         </div>
         <div class="fleet-list" id="orch-files-list"></div>
         <div id="orch-file-head" style="display:none;font-family:var(--mono);
@@ -1585,12 +1590,59 @@ pre:hover .code-copy { opacity:1; }
     });
   }
 
+  // ── Caffeinate: auto-continue an incomplete run ────────────────────
+  // With the ☕ box checked, a finished-but-incomplete run automatically
+  // fires another repair round instead of waiting on a human click —
+  // keeps grinding toward the goal. Bounded so an UNREACHABLE goal can't
+  // spin the fleet forever: it stops after a round cap OR when a round
+  // makes no progress (same audit gaps as last time).
+  const ORCH_CAFFEINE_MAX_ROUNDS = 12;
+  let orchCaffeineRounds = 0;
+  let orchCaffeineLastFeedback = null;
+
+  function orchResetCaffeine() {
+    orchCaffeineRounds = 0;
+    orchCaffeineLastFeedback = null;
+  }
+
+  function orchCaffeineNote(msg) {
+    const el = document.getElementById('orch-status');
+    if (el) el.textContent += ' · ☕ ' + msg;
+  }
+
+  // Returns true when it kicked off an auto-continue (so the caller
+  // should keep the loop alive instead of stopping).
+  function orchMaybeCaffeinate(data) {
+    const cb = document.getElementById('orch-caffeinate');
+    if (!cb || !cb.checked) return false;
+    if (data.source === 'chat') return false;
+    // Only an INCOMPLETE goal audit is worth continuing. achieved / null
+    // (audit unavailable) / a failed run all stop.
+    if (data.goal_achieved !== false || data.state === 'failed') return false;
+    if (orchCaffeineRounds >= ORCH_CAFFEINE_MAX_ROUNDS) {
+      orchCaffeineNote('stopped after ' + ORCH_CAFFEINE_MAX_ROUNDS + ' rounds');
+      return false;
+    }
+    const fb = data.goal_feedback || '';
+    if (fb && fb === orchCaffeineLastFeedback) {
+      orchCaffeineNote('stopped — no progress (same gaps)');
+      return false;
+    }
+    orchCaffeineLastFeedback = fb;
+    orchCaffeineRounds++;
+    orchStop();          // drop the current interval before re-continuing
+    orchContinue();      // posts /continue + re-attaches (resumes polling)
+    return true;
+  }
+
   async function orchPoll() {
     if (!orchId) return null;
     try {
       const data = await apiGet('/api/orchestrate/' + encodeURIComponent(orchId));
       orchRender(data);
-      if (data.state !== 'running') { orchNotifyDone(data); orchStop(); }
+      if (data.state !== 'running') {
+        if (!orchMaybeCaffeinate(data)) { orchNotifyDone(data); orchStop(); }
+      }
       return data;
     } catch (e) { /* transient poll failure — next tick retries */ }
     return null;
@@ -1603,6 +1655,7 @@ pre:hover .code-copy { opacity:1; }
   // their final state.
   async function orchAttach(id) {
     if (!id) return;
+    if (id !== orchId) orchResetCaffeine();  // fresh run → fresh round budget
     orchId = id;
     document.getElementById('orch-file-view').style.display = 'none';
     document.getElementById('orch-file-head').style.display = 'none';
@@ -1716,6 +1769,7 @@ pre:hover .code-copy { opacity:1; }
     orchRenderSeeds();
     orchId = data.orchestration_id;
     orchSelectedId = orchId;
+    orchResetCaffeine();  // new build → fresh caffeinate round budget
     orchRunsRefresh();
     document.getElementById('orch-status').textContent = 'running: submitted (planning…)';
     document.getElementById('orch-tasks').innerHTML = '';
@@ -2928,6 +2982,11 @@ pre:hover .code-copy { opacity:1; }
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
   document.getElementById('orch-continue-btn').addEventListener('click',orchContinue);
+  // Ticking caffeinate on an already-finished, incomplete run should act
+  // immediately — poll once so the terminal-state handler auto-continues.
+  document.getElementById('orch-caffeinate').addEventListener('change',function(){
+    if (this.checked) { orchResetCaffeine(); if (orchId) orchPoll(); }
+  });
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
   document.getElementById('orch-git-btn').addEventListener('click',orchGitLog);
   document.getElementById('orch-addfiles-btn').addEventListener('click',function(){

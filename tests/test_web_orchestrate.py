@@ -284,3 +284,25 @@ class TestContinueButton:
         # Button is gated on a finished run with an incomplete goal audit.
         assert "data.goal_achieved === false" in HTML
         assert "orchContinue" in HTML  # wired to a click listener
+
+
+class TestCaffeinate:
+    def test_checkbox_present(self):
+        assert 'id="orch-caffeinate"' in HTML
+        assert "caffeinate" in HTML
+
+    def test_auto_continue_logic_present(self):
+        assert "function orchMaybeCaffeinate" in HTML
+        # Fires another repair round automatically on an incomplete run.
+        assert "orchContinue()" in HTML
+
+    def test_bounded_by_round_cap(self):
+        assert "ORCH_CAFFEINE_MAX_ROUNDS" in HTML
+
+    def test_stops_on_no_progress(self):
+        # Same audit gaps two rounds running → stop, don't spin the fleet.
+        assert "orchCaffeineLastFeedback" in HTML
+        assert "no progress" in HTML
+
+    def test_reset_on_new_run(self):
+        assert "orchResetCaffeine" in HTML

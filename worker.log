@@ -1,0 +1,35 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  _____ _____        _______ _                                                │
+│ |_   _|  _  |      | _____ | |                                               │
+│   | | | | | |_ _ _ | |___  | |                                               │
+│   | | | | | | | | || _____ | |                                               │
+│   | | | |_| | | | || |___  | |___                                            │
+│   |_|  \_____/_____|_______|_____|                                           │
+│                                                                              │
+│   Restricted Airspace — Local AI Build Fleet  ·  v2.3.0                      │
+│   It doesn't exist.                                                          │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Model: Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-MLX-8bit
+Controller: ws://SparklesMint.local:18742
+Remote tools: enabled
+
+[14:57:50] INFO httpx: HTTP Request: GET https://huggingface.co/api/models/Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-MLX-8bit/revision/main "HTTP/1.1 200 OK"
+Fetching 20 files:   0%|          | 0/20 [00:00<?, ?it/s]Fetching 20 files: 100%|██████████| 20/20 [00:00<00:00, 15944.89it/s]
+[14:58:03] INFO dreamland.agent: Native tools channel: enabled
+Worker ready. Waiting for controller jobs...
+[14:58:03] INFO dreamland.gateway.worker: Connecting to controller ws://SparklesMint.local:18742 ...
+[14:58:08] INFO dreamland.gateway.worker: Registered worker ks-MacBook-Pro.local with controller ws://SparklesMint.local:18742
+[15:05:00] WARNING dreamland.gateway.worker: Worker connection lost: no close frame received or sent
+[15:05:00] INFO dreamland.gateway.worker: Reconnecting in 2.2s (attempt 1)...
+[15:05:02] INFO dreamland.gateway.worker: Connecting to controller ws://SparklesMint.local:18742 ...
+[15:05:06] INFO dreamland.gateway.worker: Registered worker ks-MacBook-Pro.local with controller ws://SparklesMint.local:18742
+[15:14:00] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:16:31] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:17:16] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:19:21] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:25:27] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:31:26] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:34:37] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
+[15:41:21] INFO dreamland.turboquant: TurboQuant KV cache: 10/40 layers replaced, 3-bit PolarQuant, QJL ratio 0.5
