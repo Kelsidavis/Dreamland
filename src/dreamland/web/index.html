@@ -168,11 +168,42 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text);
   font-family:var(--mono); font-size:11px; transition:border-color .15s; }
 .run-card:hover { border-color:var(--green-dim); }
 .run-card.active { border-color:var(--green); box-shadow: var(--glow); }
-.run-card .rc-top { display:flex; justify-content:space-between; gap:8px;
-  margin-bottom:4px; }
+.run-card .rc-top { display:flex; align-items:center; gap:7px;
+  margin-bottom:5px; }
 .run-card .rc-state { font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
 .run-card .rc-goal { color:var(--text); line-height:1.35; }
-.run-card .rc-meta { color:var(--text-dim); font-size:10px; margin-top:4px; }
+.run-card .rc-meta { color:var(--text-dim); font-size:10px; margin-top:5px; }
+/* status dot + chips + progress on each project card */
+.rc-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+.rc-dot.spin { animation: rc-pulse 1.2s ease-in-out infinite; }
+@keyframes rc-pulse { 0%,100%{opacity:1;} 50%{opacity:.2;} }
+.rc-chip { font-size:9px; letter-spacing:.05em; text-transform:uppercase;
+  padding:1px 6px; border-radius:999px; border:1px solid var(--border);
+  white-space:nowrap; }
+.rc-time { margin-left:auto; color:var(--text-dim); font-size:10px;
+  white-space:nowrap; }
+.rc-bar { height:4px; border-radius:3px; background:var(--bg-surface);
+  overflow:hidden; margin-top:6px; }
+.rc-bar > span { display:block; height:100%; background:var(--cyan);
+  transition:width .3s ease; }
+/* group headers in the projects list */
+.proj-group { font-family:var(--mono); font-size:10px; color:var(--text-dim);
+  letter-spacing:.08em; text-transform:uppercase; margin:14px 0 8px;
+  display:flex; align-items:center; gap:6px; }
+.proj-group:first-child { margin-top:0; }
+.proj-group .n { color:var(--cyan); }
+.proj-group::after { content:""; flex:1; height:1px; background:var(--border); }
+/* rich detail status header */
+#orch-status .od-head { display:flex; align-items:center; gap:8px;
+  flex-wrap:wrap; }
+.od-pill { font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  padding:2px 9px; border-radius:999px; font-family:var(--mono);
+  display:inline-flex; align-items:center; gap:5px; }
+.od-bar { flex:1 1 100%; height:5px; border-radius:3px; background:var(--bg-input);
+  overflow:hidden; }
+.od-bar > span { display:block; height:100%; background:var(--cyan);
+  transition:width .3s ease; }
+.od-note { color:var(--text-dim); }
 #orch-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
   margin:10px 0; }
 /* Fleet panel */
@@ -674,13 +705,13 @@ pre:hover .code-copy { opacity:1; }
           <button class="tb-btn" id="orch-start-btn" style="color:var(--green)">▸ start build</button>
           <button class="tb-btn" id="orch-cancel-btn" style="display:none;color:var(--red)">cancel</button>
         </div>
-        <h3>Runs</h3>
+        <h3>Projects</h3>
         <div id="orch-runs-list"></div>
       </div>
       <div class="projects-col">
         <div id="orch-status" style="font-family:var(--mono);font-size:11px;
                                      color:var(--text-dim);margin-bottom:8px">
-          No run attached — start a build or pick one on the left.</div>
+          No project selected — start a build or click one on the left.</div>
         <div class="fleet-list" id="orch-tasks"></div>
         <div id="orch-actions">
           <button class="tb-btn" id="orch-files-btn"
@@ -1520,6 +1551,46 @@ pre:hover .code-copy { opacity:1; }
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  // Compact "3m ago" / "2h ago" from an ISO timestamp — richer, at-a-
+  // glance feedback than a raw slice of the string.
+  function orchAgo(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (isNaN(t)) return orchEsc(String(iso).slice(5, 16).replace('T', ' '));
+    let s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 90) return '1m ago';
+    if (s < 3600) return Math.round(s / 60) + 'm ago';
+    if (s < 86400) return Math.round(s / 3600) + 'h ago';
+    return Math.round(s / 86400) + 'd ago';
+  }
+
+  // One place that maps a run's state (+ source + goal audit) to a
+  // colour, a short label, and whether it's live — used by both the
+  // project cards and the detail header so feedback reads consistently.
+  function orchStateMeta(r) {
+    if (r.source === 'chat') return {color:'var(--yellow)', label:'chat', live:false};
+    const map = {
+      running:{color:'var(--cyan)', label:'running', live:true},
+      completed:{color:'var(--green)', label:'done'},
+      failed:{color:'var(--red)', label:'failed'},
+      cancelled:{color:'var(--yellow)', label:'cancelled'},
+      interrupted:{color:'var(--yellow)', label:'interrupted'},
+      files:{color:'var(--cyan)', label:'files'},
+    };
+    return map[r.state] || {color:'var(--text-dim)', label:r.state || '?'};
+  }
+
+  // Goal-audit chip (met / incomplete) — a clear pass/fail signal beyond
+  // the run state. Returns '' when no audit verdict exists.
+  function orchGoalChip(goal_achieved) {
+    if (goal_achieved === true)
+      return '<span class="rc-chip" style="color:var(--green);border-color:var(--green-dim)">✓ goal</span>';
+    if (goal_achieved === false)
+      return '<span class="rc-chip" style="color:var(--red);border-color:var(--red)">✗ goal</span>';
+    return '';
+  }
+
   function orchRender(data) {
     const statusEl = document.getElementById('orch-status');
     const listEl = document.getElementById('orch-tasks');
@@ -1528,7 +1599,9 @@ pre:hover .code-copy { opacity:1; }
     // Chat project: no run/tasks — a directory of files from a
     // conversation. Show its root and open the file browser directly.
     if (data.source === 'chat' || data.state === 'files') {
-      statusEl.textContent = '💬 chat project · ' + (data.workspace_dir || '');
+      statusEl.innerHTML = '<div class="od-head">' +
+        '<span class="od-pill" style="color:var(--yellow);border:1px solid var(--border)">💬 chat project</span>' +
+        '<span class="od-note">' + orchEsc(data.workspace_dir || '') + '</span></div>';
       listEl.innerHTML = '';
       continueBtn.style.display = 'none';
       if (orchFileTargetId()) orchFilesLoad();
@@ -1539,14 +1612,29 @@ pre:hover .code-copy { opacity:1; }
     // instead of the run silently dead-ending at one auto round.
     continueBtn.style.display =
       (data.state !== 'running' && data.goal_achieved === false) ? '' : 'none';
+    // Rich status header: colored state pill (+ live pulse), task
+    // progress with a bar, repair count, goal-audit verdict, error.
+    const m = orchStateMeta(data);
+    const total = tasks.length;
     const done = tasks.filter(t => t.status === 'completed').length;
-    let line = data.state + ': ' + done + '/' + tasks.length + ' tasks';
-    if (!tasks.length && data.state === 'running') line += ' (planning…)';
-    if (data.goal_achieved === true) line += ' — goal audit: ACHIEVED';
-    if (data.goal_achieved === false) line += ' — goal audit: INCOMPLETE';
-    if (data.repair_tasks_added) line += ' (' + data.repair_tasks_added + ' repair task(s))';
-    if (data.error) line += ' — ' + data.error;
-    statusEl.textContent = line;
+    const pct = total ? Math.round(done / total * 100) : (m.live ? 15 : 0);
+    let head = '<div class="od-head">';
+    head += '<span class="od-pill" style="color:' + m.color +
+      ';border:1px solid var(--border)">' +
+      (m.live ? '<span class="rc-dot spin" style="background:' + m.color + '"></span>' : '') +
+      orchEsc(m.label) + '</span>';
+    head += '<span class="od-note">' + done + '/' + total + ' tasks' +
+      (!total && data.state === 'running' ? ' · planning…' : '') + '</span>';
+    if (data.repair_tasks_added)
+      head += '<span class="od-note">+' + data.repair_tasks_added + ' repair</span>';
+    head += orchGoalChip(data.goal_achieved);
+    if (data.error)
+      head += '<span style="color:var(--red)">' + orchEsc(data.error) + '</span>';
+    if (total || m.live)
+      head += '<div class="od-bar"><span style="width:' + pct +
+        '%;background:' + m.color + '"></span></div>';
+    head += '</div>';
+    statusEl.innerHTML = head;
 
     listEl.innerHTML = tasks.map(function(t, i) {
       const icon = {completed:'✓', failed:'✗', skipped:'–',
@@ -1607,7 +1695,14 @@ pre:hover .code-copy { opacity:1; }
 
   function orchCaffeineNote(msg) {
     const el = document.getElementById('orch-status');
-    if (el) el.textContent += ' · ☕ ' + msg;
+    if (!el) return;
+    // Append a span so the rich status header (set via innerHTML) is
+    // preserved instead of being flattened to plain text.
+    const s = document.createElement('span');
+    s.className = 'od-note';
+    s.style.color = 'var(--yellow)';
+    s.textContent = ' · ☕ ' + msg;
+    el.appendChild(s);
   }
 
   // Returns true when it kicked off an auto-continue (so the caller
@@ -1809,46 +1904,81 @@ pre:hover .code-copy { opacity:1; }
   let orchSelectedId = null;
   let orchRuns = [];
 
+  let orchRunsLoaded = false;
+
   async function orchRunsRefresh() {
+    const listEl = document.getElementById('orch-runs-list');
+    if (listEl && !orchRunsLoaded) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);' +
+        'font-family:var(--mono)">loading projects…</div>';
+    }
     try {
       const data = await apiGet('/api/orchestrations?limit=30');
       orchRuns = data.orchestrations || [];
-    } catch (e) { /* panel still usable without history */ }
+      orchRunsLoaded = true;
+    } catch (e) {
+      if (listEl && !orchRunsLoaded) {
+        listEl.innerHTML = '<div style="font-size:11px;color:var(--red);' +
+          'font-family:var(--mono)">could not load projects — retrying…</div>';
+      }
+    }
     orchRunsRender();
+  }
+
+  // Render one project card — a build (orchestration) or a chat project.
+  function orchRunCard(r) {
+    const id = r.orchestration_id;
+    const isChat = r.source === 'chat';
+    const m = orchStateMeta(r);
+    const total = r.tasks_total || 0;
+    const done = r.tasks_completed || 0;
+    const dot = '<span class="rc-dot' + (m.live ? ' spin' : '') +
+      '" style="background:' + m.color + '"></span>';
+    const stateChip = isChat
+      ? '<span class="rc-chip" style="color:var(--yellow);border-color:var(--border)">💬 chat</span>'
+      : '<span class="rc-chip" style="color:' + m.color + ';border-color:var(--border)">' +
+        orchEsc(m.label) + '</span>';
+    // Live progress bar for a running build; static for finished ones.
+    const pct = total ? Math.round(done / total * 100) : (m.live ? 15 : 0);
+    const bar = (!isChat && (total || m.live))
+      ? '<div class="rc-bar"><span style="width:' + pct + '%;background:' +
+        m.color + '"></span></div>'
+      : '';
+    const meta = isChat
+      ? total + ' file' + (total === 1 ? '' : 's')
+      : done + '/' + total + ' tasks' +
+        (r.repair_tasks_added ? ' · +' + r.repair_tasks_added + ' repair' : '');
+    return '<div class="run-card' + (id === orchSelectedId ? ' active' : '') +
+      '" data-run="' + orchEsc(id) + '" title="' + orchEsc(id) + '">' +
+      '<div class="rc-top">' + dot + stateChip + orchGoalChip(r.goal_achieved) +
+      '<span class="rc-time" title="' + orchEsc(r.created_at || '') + '">' +
+      orchAgo(r.created_at) + '</span></div>' +
+      '<div class="rc-goal">' + orchEsc((r.goal || '(untitled)').slice(0, 100)) + '</div>' +
+      bar +
+      '<div class="rc-meta">' + meta + '</div></div>';
   }
 
   function orchRunsRender() {
     const listEl = document.getElementById('orch-runs-list');
     if (!orchRuns.length) {
       listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);' +
-        'font-family:var(--mono)">No runs yet — start your first build.</div>';
+        'font-family:var(--mono)">No projects yet — start your first build above.</div>';
       return;
     }
-    const stateColor = {completed:'var(--green)', running:'var(--cyan)',
-      failed:'var(--red)', cancelled:'var(--yellow)', interrupted:'var(--yellow)',
-      files:'var(--cyan)'};
-    listEl.innerHTML = orchRuns.map(function(r) {
-      const id = r.orchestration_id;
-      const isChat = r.source === 'chat';
-      const audit = r.goal_achieved === true ? ' ✓ goal'
-        : r.goal_achieved === false ? ' ✗ goal' : '';
-      const badge = isChat
-        ? '<span style="color:var(--yellow)">💬 chat</span>'
-        : '<span class="rc-state" style="color:' +
-          (stateColor[r.state] || 'var(--text-dim)') + '">' +
-          orchEsc(r.state || '?') + audit + '</span>';
-      const when = (r.created_at || '').slice(5, 16).replace('T', ' ');
-      const meta = isChat
-        ? (r.tasks_total || 0) + ' files · ' + orchEsc(id)
-        : (r.tasks_completed || 0) + '/' + (r.tasks_total || 0) +
-          ' tasks · ' + orchEsc(id);
-      return '<div class="run-card' + (id === orchSelectedId ? ' active' : '') +
-        '" data-run="' + orchEsc(id) + '">' +
-        '<div class="rc-top">' + badge +
-        '<span style="color:var(--text-dim)">' + when + '</span></div>' +
-        '<div class="rc-goal">' + orchEsc((r.goal || '').slice(0, 90)) + '</div>' +
-        '<div class="rc-meta">' + meta + '</div></div>';
-    }).join('');
+    const builds = orchRuns.filter(function(r){ return r.source !== 'chat'; });
+    const chats = orchRuns.filter(function(r){ return r.source === 'chat'; });
+    let html = '';
+    if (builds.length) {
+      const active = builds.filter(function(r){ return r.state === 'running'; }).length;
+      html += '<div class="proj-group">builds <span class="n">' + builds.length +
+        '</span>' + (active ? ' · ' + active + ' running' : '') + '</div>' +
+        builds.map(orchRunCard).join('');
+    }
+    if (chats.length) {
+      html += '<div class="proj-group">💬 chat projects <span class="n">' +
+        chats.length + '</span></div>' + chats.map(orchRunCard).join('');
+    }
+    listEl.innerHTML = html;
     listEl.querySelectorAll('.run-card').forEach(function(card) {
       card.addEventListener('click', function() {
         orchSelectRun(card.dataset.run);
@@ -1860,6 +1990,10 @@ pre:hover .code-copy { opacity:1; }
     orchSelectedId = id;
     orchRunsRender();
     orchStop();
+    // Immediate feedback: the detail may take a fetch to fill in.
+    const st = document.getElementById('orch-status');
+    if (st) st.innerHTML = '<span class="od-note">loading project…</span>';
+    document.getElementById('orch-tasks').innerHTML = '';
     orchAttach(id);
   }
 

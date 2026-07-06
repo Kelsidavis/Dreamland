@@ -306,3 +306,39 @@ class TestCaffeinate:
 
     def test_reset_on_new_run(self):
         assert "orchResetCaffeine" in HTML
+
+
+class TestProjectsPanelUX:
+    """The projects area groups individual projects to click between and
+    gives richer at-a-glance feedback (state pill, progress, verdict)."""
+
+    def test_projects_grouped_builds_and_chat(self):
+        assert "class=\"proj-group\"" in HTML
+        assert "builds " in HTML
+        assert "chat projects" in HTML
+
+    def test_project_card_helper(self):
+        assert "function orchRunCard" in HTML
+
+    def test_progress_bar_and_state_dot(self):
+        assert "rc-bar" in HTML          # per-card progress bar
+        assert "rc-dot" in HTML          # status dot
+        assert "rc-pulse" in HTML        # live pulse animation
+
+    def test_relative_time_helper(self):
+        assert "function orchAgo" in HTML
+        assert "ago" in HTML
+
+    def test_goal_verdict_chip(self):
+        assert "function orchGoalChip" in HTML
+        assert "✓ goal" in HTML and "✗ goal" in HTML
+
+    def test_detail_status_header_is_rich(self):
+        # State pill + progress bar in the detail header, not a plain line.
+        assert "od-pill" in HTML
+        assert "od-bar" in HTML
+
+    def test_loading_and_empty_feedback(self):
+        assert "loading projects…" in HTML
+        assert "No projects yet" in HTML
+        assert "loading project…" in HTML  # per-project select feedback
