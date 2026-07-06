@@ -15,3 +15,6 @@ venv/
 
 # Claude Code session state
 .claude/
+
+# runtime worker log
+worker.log
