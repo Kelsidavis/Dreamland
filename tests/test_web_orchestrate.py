@@ -261,3 +261,12 @@ class TestBuildNotifications:
         assert "orchNotifyDone" in HTML
         assert "Notification.permission" in HTML
         assert "document.hidden" in HTML
+
+
+class TestChatProjectsUI:
+    def test_run_card_handles_chat_source(self):
+        assert "r.source === 'chat'" in HTML
+        assert "💬 chat" in HTML
+
+    def test_detail_opens_files_for_chat(self):
+        assert "data.source === 'chat' || data.state === 'files'" in HTML

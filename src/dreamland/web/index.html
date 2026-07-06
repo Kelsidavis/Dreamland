@@ -1516,6 +1516,14 @@ pre:hover .code-copy { opacity:1; }
     const statusEl = document.getElementById('orch-status');
     const listEl = document.getElementById('orch-tasks');
     const tasks = data.tasks || [];
+    // Chat project: no run/tasks — a directory of files from a
+    // conversation. Show its root and open the file browser directly.
+    if (data.source === 'chat' || data.state === 'files') {
+      statusEl.textContent = '💬 chat project · ' + (data.workspace_dir || '');
+      listEl.innerHTML = '';
+      if (orchFileTargetId()) orchFilesLoad();
+      return;
+    }
     const done = tasks.filter(t => t.status === 'completed').length;
     let line = data.state + ': ' + done + '/' + tasks.length + ' tasks';
     if (!tasks.length && data.state === 'running') line += ' (planning…)';
@@ -1736,20 +1744,29 @@ pre:hover .code-copy { opacity:1; }
       return;
     }
     const stateColor = {completed:'var(--green)', running:'var(--cyan)',
-      failed:'var(--red)', cancelled:'var(--yellow)', interrupted:'var(--yellow)'};
+      failed:'var(--red)', cancelled:'var(--yellow)', interrupted:'var(--yellow)',
+      files:'var(--cyan)'};
     listEl.innerHTML = orchRuns.map(function(r) {
       const id = r.orchestration_id;
+      const isChat = r.source === 'chat';
       const audit = r.goal_achieved === true ? ' ✓ goal'
         : r.goal_achieved === false ? ' ✗ goal' : '';
+      const badge = isChat
+        ? '<span style="color:var(--yellow)">💬 chat</span>'
+        : '<span class="rc-state" style="color:' +
+          (stateColor[r.state] || 'var(--text-dim)') + '">' +
+          orchEsc(r.state || '?') + audit + '</span>';
       const when = (r.created_at || '').slice(5, 16).replace('T', ' ');
+      const meta = isChat
+        ? (r.tasks_total || 0) + ' files · ' + orchEsc(id)
+        : (r.tasks_completed || 0) + '/' + (r.tasks_total || 0) +
+          ' tasks · ' + orchEsc(id);
       return '<div class="run-card' + (id === orchSelectedId ? ' active' : '') +
         '" data-run="' + orchEsc(id) + '">' +
-        '<div class="rc-top"><span class="rc-state" style="color:' +
-        (stateColor[r.state] || 'var(--text-dim)') + '">' + orchEsc(r.state || '?') +
-        audit + '</span><span style="color:var(--text-dim)">' + when + '</span></div>' +
+        '<div class="rc-top">' + badge +
+        '<span style="color:var(--text-dim)">' + when + '</span></div>' +
         '<div class="rc-goal">' + orchEsc((r.goal || '').slice(0, 90)) + '</div>' +
-        '<div class="rc-meta">' + (r.tasks_completed || 0) + '/' +
-        (r.tasks_total || 0) + ' tasks · ' + orchEsc(id) + '</div></div>';
+        '<div class="rc-meta">' + meta + '</div></div>';
     }).join('');
     listEl.querySelectorAll('.run-card').forEach(function(card) {
       card.addEventListener('click', function() {

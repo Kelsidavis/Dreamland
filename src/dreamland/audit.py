@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,28 @@ _SECRET_KEY_HINT = ("password", "passwd", "secret", "token", "api_key",
 
 _MAX_VALUE_LEN = 512
 _MAX_RESULT_LEN = 512
+
+
+# Active session for the current async task. The skill registry's audit
+# call and the filesystem write-hook read this when no explicit session
+# is threaded through — set by the gateway around a chat turn so
+# tool activity can be attributed to the conversation that caused it.
+_active_session: ContextVar[str | None] = ContextVar(
+    "dreamland_active_session", default=None,
+)
+
+
+def set_active_session(session: str | None):
+    """Bind the active session for this task; returns the reset token."""
+    return _active_session.set(session)
+
+
+def reset_active_session(token) -> None:
+    _active_session.reset(token)
+
+
+def get_active_session() -> str | None:
+    return _active_session.get()
 
 
 def risk_tag(tool_name: str) -> str:
@@ -131,7 +154,7 @@ def audit_tool_call(
             "tool": tool_name,
             "risk": risk_tag(tool_name),
             "status": status,
-            "session": session,
+            "session": session or _active_session.get(),
             "args": _redact(arguments),
             "result": result_preview,
             "error": error,

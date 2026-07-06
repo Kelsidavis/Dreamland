@@ -7,6 +7,32 @@ from typing import Any
 
 from dreamland.skills.base import Skill, ToolDefinition
 
+# File-write observers: the gateway registers one to record which
+# directories a chat session produces files in, so those show up as
+# projects. Callbacks are invoked as ``cb(session, path)`` after every
+# successful write/edit. Best-effort — an error in one observer never
+# affects the write or the other observers. Tests clear the list
+# directly to avoid leaking callbacks across cases.
+_write_observers: list = []
+
+
+def register_write_observer(cb) -> None:
+    """Register a file-write observer, invoked as ``cb(session, path)``
+    after every successful write/edit."""
+    _write_observers.append(cb)
+
+
+def _notify_write(path) -> None:
+    if not _write_observers:
+        return
+    from dreamland.audit import get_active_session
+    session = get_active_session()
+    for cb in list(_write_observers):
+        try:
+            cb(session, str(path))
+        except Exception:
+            pass
+
 
 class FileSystemSkill(Skill):
     @property
@@ -98,6 +124,7 @@ class FileSystemSkill(Skill):
                 path = Path(arguments["path"]).expanduser()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(arguments["content"], encoding="utf-8")
+                _notify_write(path)
                 return f"Written {len(arguments['content'])} bytes to {path}"
 
             case "edit_file":
@@ -144,6 +171,7 @@ class FileSystemSkill(Skill):
                     )
                 new_content = content.replace(old_string, new_string, 1)
                 path.write_text(new_content, encoding="utf-8")
+                _notify_write(path)
                 # Surface the actual delta so the model knows what
                 # changed without re-reading the file.
                 delta = len(new_content) - len(content)

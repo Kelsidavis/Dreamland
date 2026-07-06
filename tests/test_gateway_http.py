@@ -29,6 +29,8 @@ def gateway(store):
     pin_store = SessionPinStore(path=store.store_dir / "session_pins.json")
     worker_state_store = WorkerStateStore(path=store.store_dir / "worker_state.json")
     orch_store = OrchestrationStore(path=store.store_dir / "orchestrations.json")
+    from dreamland.persistence.chat_projects import ChatProjectStore
+    chat_project_store = ChatProjectStore(path=store.store_dir / "chat_projects.json")
     return GatewayServer(
         config=config,
         agent=agent,
@@ -36,6 +38,7 @@ def gateway(store):
         pin_store=pin_store,
         worker_state_store=worker_state_store,
         orch_store=orch_store,
+        chat_project_store=chat_project_store,
         workspace_root=store.store_dir / "workspaces",
     )
 
@@ -6235,3 +6238,76 @@ class TestProjectContinuity:
             "tasks": [{"role": "coder", "prompt": "x"}],
         })
         assert resp.status_code == 404
+
+
+class TestChatProjectsConsolidation:
+    """Files the agent writes during chat surface in the Projects list
+    (via /api/orchestrations) and are browsable through the same
+    files/zip endpoints as orchestration workspaces."""
+
+    def _seed_chat_project(self, gateway, tmp_path, session="webchat-abc"):
+        proj = tmp_path / "cowlitzlore"
+        proj.mkdir(parents=True, exist_ok=True)
+        (proj / "notes.md").write_text("# lore\n")
+        (proj / "sub").mkdir(exist_ok=True)
+        (proj / "sub" / "b.py").write_text("X = 1\n")
+        gateway._on_chat_write(session, str(proj / "notes.md"))
+        gateway._on_chat_write(session, str(proj / "sub" / "b.py"))
+        return session, proj
+
+    def test_chat_project_listed(self, gateway, client, tmp_path):
+        session, proj = self._seed_chat_project(gateway, tmp_path)
+        data = client.get("/api/orchestrations").json()["orchestrations"]
+        chat = [r for r in data if r.get("source") == "chat"]
+        assert len(chat) == 1
+        assert chat[0]["orchestration_id"] == "chat_" + session
+        assert chat[0]["tasks_total"] == 2  # two files recorded
+
+    def test_chat_project_root_generalized(self, gateway, tmp_path):
+        session, proj = self._seed_chat_project(gateway, tmp_path)
+        assert gateway._chat_projects[session]["root"] == str(proj.resolve())
+
+    def test_chat_project_files_browsable(self, gateway, client, tmp_path):
+        session, proj = self._seed_chat_project(gateway, tmp_path)
+        oid = "chat_" + session
+        listing = client.get(f"/api/orchestrate/{oid}/files").json()
+        paths = sorted(f["path"] for f in listing["files"])
+        assert paths == ["notes.md", "sub/b.py"]
+        got = client.get(f"/api/orchestrate/{oid}/files/notes.md")
+        assert got.text == "# lore\n"
+
+    def test_chat_project_synthetic_status(self, gateway, client, tmp_path):
+        session, proj = self._seed_chat_project(gateway, tmp_path)
+        data = client.get(f"/api/orchestrate/chat_{session}").json()
+        assert data["state"] == "files"
+        assert data["source"] == "chat"
+        assert data["tasks"] == []
+        assert data["workspace_dir"] == str(proj.resolve())
+
+    def test_chat_project_zip(self, gateway, client, tmp_path):
+        import io
+        import zipfile
+        session, proj = self._seed_chat_project(gateway, tmp_path)
+        resp = client.get(f"/api/orchestrate/chat_{session}/archive")
+        assert resp.status_code == 200
+        names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+        assert "notes.md" in names and "sub/b.py" in names
+
+    def test_orch_session_not_a_chat_project(self, gateway, tmp_path):
+        # Writes attributed to an orchestrator session are not chat
+        # projects (they become orchestration projects).
+        gateway._on_chat_write("orch-coder-xyz", str(tmp_path / "p" / "a.py"))
+        assert not gateway._chat_projects
+
+    def test_unsafe_root_not_exposed(self, gateway, client, tmp_path, monkeypatch):
+        # A write whose root generalizes to $HOME must not expose home.
+        import pathlib
+        monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
+        (tmp_path / "a.py").write_text("x")
+        (tmp_path / "b.py").write_text("y")
+        gateway._on_chat_write("webchat-h", str(tmp_path / "a.py"))
+        gateway._on_chat_write("webchat-h", str(tmp_path / "b.py"))
+        # Root is tmp_path == home → not a safe project root.
+        data = client.get("/api/orchestrations").json()["orchestrations"]
+        assert not [r for r in data if r.get("source") == "chat"]
+        assert client.get("/api/orchestrate/chat_webchat-h/files").status_code == 404

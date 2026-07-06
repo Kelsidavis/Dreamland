@@ -57,6 +57,7 @@ from dreamland.nodes.roles import (
     worker_quality_tier,
 )
 from dreamland.nodes.tracker import NodeTracker
+from dreamland.persistence.chat_projects import ChatProjectStore
 from dreamland.persistence.orchestrations import OrchestrationStore
 from dreamland.persistence.session_pins import SessionPinStore
 from dreamland.persistence.store import ConversationStore
@@ -204,6 +205,10 @@ class GatewayServer:
     pin_store: SessionPinStore = field(default_factory=SessionPinStore)
     worker_state_store: WorkerStateStore = field(default_factory=WorkerStateStore)
     orch_store: OrchestrationStore = field(default_factory=OrchestrationStore)
+    # Chat-generated projects: directories the agent wrote files into
+    # during a conversation, surfaced in the Projects panel alongside
+    # orchestration runs.
+    chat_project_store: ChatProjectStore = field(default_factory=ChatProjectStore)
     # Root for managed per-orchestration workspaces, used when a caller
     # doesn't supply workspace_dir. Without a workspace, extract_to
     # tasks silently never write files — an external system POSTing a
@@ -240,6 +245,10 @@ class GatewayServer:
     # Terminal orchestration records (background AND sync), hydrated
     # from orch_store at startup so history survives restarts.
     _orch_history: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Chat projects: session id -> {root, count, first_ts, last_ts,
+    # title}. Hydrated from chat_project_store; a filesystem write-hook
+    # keeps it current as chat sessions produce files.
+    _chat_projects: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._session_pins = self.pin_store.load()
@@ -260,6 +269,16 @@ class GatewayServer:
                 self.orch_store.save(self._orch_history)
             except OSError as exc:
                 log.warning("orchestration history save failed: %s", exc)
+        # Chat projects survive restarts too; register the filesystem
+        # write-hook so new chat file-writes keep the map current.
+        self._chat_projects = self.chat_project_store.load()
+        try:
+            from dreamland.skills.builtin.filesystem import (
+                register_write_observer,
+            )
+            register_write_observer(self._on_chat_write)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("chat-project write hook not registered: %s", exc)
         # Hydrate manual task overrides from disk so they survive a
         # coordinator restart, not just a worker reconnect. Unknown task
         # values are silently skipped — schema may have evolved.
@@ -1094,6 +1113,8 @@ class GatewayServer:
         the next message; the client just sees the failure for this
         turn.
         """
+        from dreamland.audit import reset_active_session, set_active_session
+        token = set_active_session(session_id)
         try:
             async for event in self.agent.step_streaming(session.conversation):
                 await ws.send(json.dumps(event.to_ws_message(session_id)))
@@ -1112,6 +1133,8 @@ class GatewayServer:
                     AgentEvent.error(_err_str(exc)).to_ws_message(session_id)
                 )
             )
+        finally:
+            reset_active_session(token)
 
     # ── Role-based routing ──────────────────────────────────────────
 
@@ -2944,6 +2967,81 @@ class GatewayServer:
         p = self.workspace_root / oid
         p.mkdir(parents=True, exist_ok=True)
         return str(p.resolve())
+
+    @staticmethod
+    def _safe_project_root(root: str) -> bool:
+        """Whether a directory is a plausible, safe project root to
+        expose through the file/zip endpoints.
+
+        The file browser serves everything under a project root, so a
+        root that is the home directory, a filesystem root, or an
+        ancestor of home would over-expose. Require depth (blocks ``/``,
+        ``/Users``) and refuse home itself or any ancestor of it. Chat
+        writes scattered across unrelated trees generalize to such a
+        shallow root and are simply not surfaced as a project.
+        """
+        try:
+            r = Path(root).resolve()
+            home = Path.home().resolve()
+        except OSError:
+            return False
+        if len(r.parts) < 3:
+            return False
+        if r == home or r in home.parents:
+            return False
+        return True
+
+    def _on_chat_write(self, session: str | None, file_path: str) -> None:
+        """Filesystem write-hook: attribute a file write to the chat
+        session that caused it and record the project directory.
+
+        Skips orchestration/idle sessions (those become orchestration
+        projects) and writes landing inside a managed orchestration
+        workspace (already a project). Best-effort — never raises into
+        a tool call.
+        """
+        try:
+            if not session or session.startswith(("orch-", "_idle")):
+                return
+            resolved = Path(file_path).expanduser().resolve()
+            ws_root = self.workspace_root.resolve()
+            if resolved == ws_root or ws_root in resolved.parents:
+                return  # inside an orchestration workspace already
+            from datetime import UTC, datetime
+            ts = datetime.now(UTC).isoformat(timespec="seconds")
+            title = None
+            store = getattr(self.sessions, "store", None)
+            if store is not None:
+                try:
+                    conv = store.load(session)
+                    if conv is not None:
+                        title = getattr(conv, "title", None) or getattr(
+                            conv, "display_title", None,
+                        )
+                except Exception:
+                    title = None
+            self.chat_project_store.upsert(
+                self._chat_projects, session, str(resolved), ts, title,
+            )
+            try:
+                self.chat_project_store.save(self._chat_projects)
+            except OSError:
+                pass
+        except Exception as exc:  # pragma: no cover - never break a write
+            log.debug("chat-project record failed: %s", exc)
+
+    def _chat_project_workspace(self, session: str) -> str | None:
+        """Resolve a chat-project session to its root dir, or None when
+        unknown or no longer a safe/existing directory."""
+        rec = self._chat_projects.get(session)
+        if not rec:
+            return None
+        root = rec.get("root")
+        if not root or not self._safe_project_root(root):
+            return None
+        if not Path(root).is_dir():
+            return None
+        return root
 
     async def _run_git(
         self, workspace: str, *args: str,
@@ -8000,6 +8098,37 @@ class GatewayServer:
             fields appear once the run finishes.
             """
             oid = request.path_params["oid"]
+            # Chat projects have no run/tasks — synthesize a terminal
+            # record so the Projects panel's attach flow (status →
+            # files) works uniformly for them.
+            if oid.startswith("chat_"):
+                session = oid[len("chat_"):]
+                root = self._chat_project_workspace(session)
+                if root is None:
+                    return JSONResponse(
+                        {"error": f"unknown chat project {oid!r}"},
+                        status_code=404,
+                    )
+                if request.method == "DELETE":
+                    return JSONResponse(
+                        {"orchestration_id": oid, "state": "files"},
+                    )
+                rec = self._chat_projects.get(session) or {}
+                return JSONResponse({
+                    "orchestration_id": oid,
+                    "goal": rec.get("title") or Path(root).name,
+                    "state": "files",
+                    "source": "chat",
+                    "success": None,
+                    "planned": False,
+                    "goal_achieved": None,
+                    "goal_feedback": "",
+                    "repair_tasks_added": 0,
+                    "total_elapsed_ms": None,
+                    "workspace_dir": root,
+                    "synthesis": "",
+                    "tasks": [],
+                })
             job = self._orchestrations.get(oid)
             if job is None:
                 # Fall back to persisted history — finished/interrupted
@@ -8086,12 +8215,52 @@ class GatewayServer:
                     ),
                     "goal_achieved": rec.get("goal_achieved"),
                 })
+            # Chat-generated projects: directories the agent wrote files
+            # into during a conversation. Deduped against orchestration
+            # workspaces (a chat that edited a build's workspace isn't a
+            # separate project) and filtered to safe, existing roots.
+            orch_roots = []
+            for it in items:
+                w = None
+                job = self._orchestrations.get(it["orchestration_id"])
+                if job is not None:
+                    w = job.get("workspace_dir")
+                else:
+                    w = (self._orch_history.get(it["orchestration_id"]) or {}
+                         ).get("workspace_dir")
+                if w:
+                    orch_roots.append(str(Path(w).resolve()))
+            for session, rec in self._chat_projects.items():
+                root = rec.get("root")
+                if not root or not self._safe_project_root(root):
+                    continue
+                rroot = str(Path(root).resolve())
+                if any(rroot == o or o in Path(rroot).parents
+                       or rroot in Path(o).parents for o in orch_roots):
+                    continue
+                if not Path(rroot).is_dir():
+                    continue
+                name = rec.get("title") or Path(rroot).name
+                items.append({
+                    "orchestration_id": "chat_" + session,
+                    "goal": name[:160],
+                    "state": "files",
+                    "source": "chat",
+                    "created_at": rec.get("last_ts", ""),
+                    "tasks_total": rec.get("count", 0),
+                    "tasks_completed": rec.get("count", 0),
+                    "goal_achieved": None,
+                })
             items.sort(key=lambda x: x["created_at"] or "", reverse=True)
             return JSONResponse({"orchestrations": items[:limit]})
 
         def _orch_workspace(oid: str) -> str | None:
-            """Workspace directory for an orchestration id, from the
-            live job registry or persisted history."""
+            """Workspace directory for a project id, from the live job
+            registry, persisted orchestration history, or a chat
+            project (id ``chat_<session>``). Powers the file/zip/git
+            endpoints for every project kind."""
+            if oid.startswith("chat_"):
+                return self._chat_project_workspace(oid[len("chat_"):])
             job = self._orchestrations.get(oid)
             if job is not None:
                 return job.get("workspace_dir")
