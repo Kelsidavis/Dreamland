@@ -2,9 +2,50 @@
 
 from __future__ import annotations
 
-import pytest
+# ── Data-home isolation ──────────────────────────────────────────────
+# MUST run before importing anything from ``dreamland``: config resolves
+# ``DREAMLAND_HOME`` once at import time, and every ``DEFAULT_*_PATH``
+# (conversations, orchestrations, session pins, worker state, chat
+# projects, audit log) is frozen from it right then. A fixture that
+# monkeypatches the env var later is therefore too late — the defaults
+# are already bound to the developer's real ~/.dreamland / ~/.towel.
+#
+# Without this, any store a test constructs *without* an explicit tmp
+# path reads and writes real user data. That is not hypothetical: the
+# chat-project write-observer once generalized a project root across
+# runs straight into the live chat_projects.json. Point the home at a
+# throwaway dir so a stray default-path store can never touch real data.
+# ``setdefault`` respects an explicitly-exported home (deliberate runs).
+import atexit
+import os
+import shutil
+import tempfile
 
-from dreamland.agent.runtime import AgentRuntime
+_isolated_home = False
+if not os.environ.get("DREAMLAND_HOME") and not os.environ.get("TOWEL_HOME"):
+    _test_home = tempfile.mkdtemp(prefix="dreamland-test-home-")
+    os.environ["DREAMLAND_HOME"] = _test_home
+    atexit.register(shutil.rmtree, _test_home, ignore_errors=True)
+    _isolated_home = True
+
+import pytest  # noqa: E402  — must follow the data-home isolation above
+
+from dreamland.agent.runtime import AgentRuntime  # noqa: E402
+
+# When we set the throwaway home, fail loudly at collection if it didn't
+# actually take — e.g. a future import pulled ``dreamland.config`` in
+# before this file ran, freezing the defaults onto real user data.
+# Checked once at import, not per test (test_config deliberately reloads
+# config with other homes). Skipped when the home was exported
+# deliberately — that run owns whatever it points at.
+if _isolated_home:
+    import dreamland.config as _cfg
+
+    assert str(_cfg.DREAMLAND_HOME) == os.environ["DREAMLAND_HOME"], (
+        f"test data-home isolation failed: DREAMLAND_HOME resolved to "
+        f"{_cfg.DREAMLAND_HOME}, not the throwaway {os.environ['DREAMLAND_HOME']}. "
+        f"dreamland.config was imported before conftest set the env var."
+    )
 
 
 @pytest.fixture(autouse=True)
