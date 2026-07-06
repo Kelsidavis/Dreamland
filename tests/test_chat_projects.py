@@ -68,7 +68,7 @@ class TestWriteHookIntegration:
         from dreamland.skills.builtin import filesystem as fs
 
         captured = []
-        fs.register_write_observer(lambda sess, path: captured.append((sess, path)))
+        fs.set_write_observer(lambda sess, path: captured.append((sess, path)))
         try:
             skill = fs.FileSystemSkill()
             target = tmp_path / "proj" / "hello.py"
@@ -80,7 +80,7 @@ class TestWriteHookIntegration:
             finally:
                 audit.reset_active_session(token)
         finally:
-            fs._write_observers.clear()
+            fs.set_write_observer(None)
         assert captured
         sess, path = captured[-1]
         assert sess == "webchat-xyz"

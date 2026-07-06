@@ -272,13 +272,8 @@ class GatewayServer:
         # Chat projects survive restarts too; register the filesystem
         # write-hook so new chat file-writes keep the map current.
         self._chat_projects = self.chat_project_store.load()
-        try:
-            from dreamland.skills.builtin.filesystem import (
-                register_write_observer,
-            )
-            register_write_observer(self._on_chat_write)
-        except Exception as exc:  # pragma: no cover - defensive
-            log.debug("chat-project write hook not registered: %s", exc)
+        from dreamland.skills.builtin.filesystem import set_write_observer
+        set_write_observer(self._on_chat_write)
         # Hydrate manual task overrides from disk so they survive a
         # coordinator restart, not just a worker reconnect. Unknown task
         # values are silently skipped — schema may have evolved.

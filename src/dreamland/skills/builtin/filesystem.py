@@ -7,31 +7,38 @@ from typing import Any
 
 from dreamland.skills.base import Skill, ToolDefinition
 
-# File-write observers: the gateway registers one to record which
-# directories a chat session produces files in, so those show up as
-# projects. Callbacks are invoked as ``cb(session, path)`` after every
-# successful write/edit. Best-effort — an error in one observer never
-# affects the write or the other observers. Tests clear the list
-# directly to avoid leaking callbacks across cases.
-_write_observers: list = []
+# File-write observer: the gateway sets one to record which directories
+# a chat session produces files in, so those show up as projects. It is
+# invoked as ``cb(session, path)`` after every successful write/edit.
+#
+# A single last-writer-wins slot (not a list) is deliberate: the
+# observer lives in module state, and a test suite constructs many
+# gateway instances, each of which sets it in __post_init__. A list
+# would accumulate every one of those stale callbacks forever — so a
+# single unrelated ``write_file`` in a later test would fan out to
+# dozens of dead gateways, several of which persist to the real
+# ~/.dreamland store, polluting the user's data. Last-writer-wins keeps
+# exactly one live observer (the one gateway that actually exists in
+# production; the most recent one in a test). Best-effort — an observer
+# error never affects the write.
+_write_observer = None
 
 
-def register_write_observer(cb) -> None:
-    """Register a file-write observer, invoked as ``cb(session, path)``
-    after every successful write/edit."""
-    _write_observers.append(cb)
+def set_write_observer(cb) -> None:
+    """Set (or clear, with None) the single file-write observer."""
+    global _write_observer
+    _write_observer = cb
 
 
 def _notify_write(path) -> None:
-    if not _write_observers:
+    cb = _write_observer
+    if cb is None:
         return
     from dreamland.audit import get_active_session
-    session = get_active_session()
-    for cb in list(_write_observers):
-        try:
-            cb(session, str(path))
-        except Exception:
-            pass
+    try:
+        cb(get_active_session(), str(path))
+    except Exception:
+        pass
 
 
 class FileSystemSkill(Skill):
