@@ -2956,6 +2956,42 @@ class GatewayServer:
             ],
         }
 
+    @staticmethod
+    def _result_from_record(rec: dict[str, Any]):
+        """Rebuild an ``OrchestratorResult`` from a persisted history
+        record so a finished run can be re-audited and repaired again on
+        demand — even after the live in-memory result is gone (e.g. a
+        coordinator restart). Fidelity is whatever ``_persist_orchestration``
+        stored per task; the workspace on disk is the real evidence the
+        re-audit reads."""
+        from dreamland.agent.orchestrator import AgentTask, OrchestratorResult
+        tasks: list[AgentTask] = []
+        for t in rec.get("tasks") or []:
+            task = AgentTask(
+                role=t.get("role", "default"),
+                prompt=t.get("prompt", ""),
+                depends_on=list(t.get("depends_on") or []),
+                with_tools=bool(t.get("with_tools", False)),
+                extract_to=t.get("extract_to"),
+                run_check=bool(t.get("run_check", False)),
+                verify=bool(t.get("verify", False)),
+            )
+            task.status = t.get("status") or "completed"
+            task.result = t.get("result") or ""
+            task.attempts = int(t.get("attempts") or 0)
+            task.verified = t.get("verified")
+            task.run_output = t.get("run_output")
+            task.extracted_path = t.get("extracted_path")
+            em = t.get("elapsed_ms")
+            task.elapsed = em / 1000.0 if isinstance(em, (int, float)) else 0.0
+            tasks.append(task)
+        result = OrchestratorResult(tasks=tasks)
+        result.goal_achieved = rec.get("goal_achieved")
+        result.goal_feedback = rec.get("goal_feedback") or ""
+        result.synthesis = rec.get("synthesis") or ""
+        result.repair_tasks_added = int(rec.get("repair_tasks_added") or 0)
+        return result
+
     def _managed_workspace(self, oid: str) -> str:
         """Create (if needed) and return the managed workspace for an
         orchestration that didn't bring its own workspace_dir."""
@@ -8264,6 +8300,162 @@ class GatewayServer:
                 return record.get("workspace_dir")
             return None
 
+        async def api_orchestrate_continue(request: Request) -> JSONResponse:
+            """POST /api/orchestrate/<id>/continue — run another repair
+            round on a finished orchestration whose goal wasn't met.
+
+            ``run_goal`` deliberately runs at most one automatic repair
+            round, then stops with ``goal_achieved=false`` — the design
+            says a goal the fleet can't reach in two audited passes needs
+            a human. This endpoint IS that human-in-the-loop: it re-audits
+            the current workspace against the goal and, if gaps remain,
+            plans and executes one more targeted repair round in the same
+            workspace, re-auditing at the end. Repeatable — each call is
+            one more round, so the operator decides when to stop instead
+            of the run silently dead-ending.
+
+            Runs in the background under the SAME id, flipping state
+            running→completed, so the existing status/poll UI just works.
+            """
+            from dreamland.agent.orchestrator import Orchestrator
+
+            oid = request.path_params["oid"]
+            if oid.startswith("chat_"):
+                return JSONResponse(
+                    {"error": "chat projects have no goal to continue"},
+                    status_code=400,
+                )
+            body: dict[str, Any] = {}
+            try:
+                raw = await request.body()
+                if raw:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        body = parsed
+            except (json.JSONDecodeError, ValueError):
+                body = {}
+            parallel = body.get("parallel", True)
+            verify = body.get("verify", False)
+            if not isinstance(parallel, bool) or not isinstance(verify, bool):
+                return JSONResponse(
+                    {"error": "parallel and verify must be booleans"},
+                    status_code=400,
+                )
+
+            # A live run for this id must be terminal before we continue
+            # it — no concurrent rounds mutating the same workspace.
+            live = self._orchestrations.get(oid)
+            if live is not None and live.get("state") == "running":
+                return JSONResponse(
+                    {"error": f"orchestration {oid!r} is still running"},
+                    status_code=409,
+                )
+
+            # Prefer the live in-memory result (full fidelity); fall back
+            # to reconstructing from persisted history (survives restart).
+            if live is not None and live.get("result") is not None:
+                goal = live["goal"]
+                workspace_dir = live.get("workspace_dir")
+                auto_plan = live.get("auto_plan", False)
+                result = live["result"]
+            else:
+                rec = self._orch_history.get(oid)
+                if rec is None:
+                    return JSONResponse(
+                        {"error": f"unknown orchestration id {oid!r}"},
+                        status_code=404,
+                    )
+                goal = rec.get("goal") or ""
+                workspace_dir = rec.get("workspace_dir")
+                auto_plan = bool(rec.get("planned", False))
+                result = self._result_from_record(rec)
+
+            if not workspace_dir or not Path(workspace_dir).is_dir():
+                return JSONResponse(
+                    {"error": "orchestration has no workspace to continue in"},
+                    status_code=409,
+                )
+
+            orch = Orchestrator(
+                config=self.config,
+                skills=getattr(self.agent, "skills", None),
+                memory=getattr(self.agent, "memory", None),
+                dispatcher=self,
+            )
+            git_enabled = (Path(workspace_dir) / ".git").is_dir()
+            job: dict[str, Any] = {
+                "goal": goal,
+                "tasks": result.tasks,   # extended live as repair tasks run
+                "workspace_dir": workspace_dir,
+                "auto_plan": auto_plan,
+                "state": "running",
+                "error": None,
+                "result": result,
+                "started_at": time.monotonic(),
+            }
+
+            async def _drive() -> None:
+                try:
+                    # Re-audit against the CURRENT workspace — the gaps to
+                    # repair are the ones that exist now, not the stale
+                    # feedback from the last run (files may have changed,
+                    # or the prior audit was unavailable).
+                    await orch._refresh_run_outputs(result, workspace_dir)
+                    achieved, feedback = await orch.check_goal(
+                        goal, result, workspace_dir,
+                    )
+                    result.goal_achieved = achieved
+                    result.goal_feedback = feedback
+                    if achieved is False:
+                        await orch.repair_round(
+                            goal, result, workspace_dir,
+                            parallel=parallel, verify=verify,
+                        )
+                    if git_enabled:
+                        tag = (
+                            "achieved" if result.goal_achieved
+                            else "partial"
+                        )
+                        await self._git_commit_workspace(
+                            workspace_dir,
+                            f"continue {tag}: {goal[:60]} [dreamland:{oid}]",
+                        )
+                    job["state"] = "completed"
+                except asyncio.CancelledError:
+                    job["state"] = "cancelled"
+                    self._persist_orchestration(
+                        oid, goal, job["tasks"], workspace_dir, auto_plan,
+                        state="cancelled", result=result,
+                    )
+                    raise
+                except ValueError as exc:
+                    # Repair planner produced no plan — not a crash.
+                    result.goal_feedback += f"\n(repair planning failed: {exc})"
+                    job["state"] = "completed"
+                except Exception as exc:
+                    log.exception("continue %s failed: %s", oid, exc)
+                    job["state"] = "failed"
+                    job["error"] = _err_str(exc)
+                self._persist_orchestration(
+                    oid, goal, job["tasks"], workspace_dir, auto_plan,
+                    state=job["state"], result=result, error=job["error"],
+                )
+
+            self._persist_orchestration(
+                oid, goal, job["tasks"], workspace_dir, auto_plan,
+                state="running", result=result,
+            )
+            job["task"] = asyncio.create_task(_drive())
+            self._orchestrations[oid] = job
+            return JSONResponse(
+                {
+                    "orchestration_id": oid,
+                    "state": "running",
+                    "status_url": f"/api/orchestrate/{oid}",
+                },
+                status_code=202,
+            )
+
         async def api_orchestrate_files(request: Request) -> JSONResponse:
             """GET /api/orchestrate/<id>/files — list the project files
             an orchestration produced.
@@ -8793,6 +8985,11 @@ class GatewayServer:
                 "/api/orchestrate/{oid}",
                 api_orchestrate_status,
                 methods=["GET", "DELETE"],
+            ),
+            Route(
+                "/api/orchestrate/{oid}/continue",
+                api_orchestrate_continue,
+                methods=["POST"],
             ),
             Route(
                 "/api/orchestrate/{oid}/files",

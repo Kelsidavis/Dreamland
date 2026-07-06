@@ -1710,28 +1710,55 @@ class Orchestrator:
             log.info("run_goal: audit found gaps, planning repair: %s",
                      feedback[:200])
             try:
-                repair_tasks = await self.plan_repair(
-                    goal, feedback, result,
-                    workspace_dir=workspace_dir, verify=verify,
+                await self.repair_round(
+                    goal, result, workspace_dir,
+                    parallel=parallel, verify=verify,
                 )
             except ValueError as exc:
                 result.goal_feedback += f"\n(repair planning failed: {exc})"
-                result.total_elapsed += time.perf_counter() - start_check
-                return result
-            await runner(goal, repair_tasks, workspace_dir=workspace_dir)
-            result.tasks.extend(repair_tasks)
-            result.repair_tasks_added = len(repair_tasks)
-            await self._refresh_run_outputs(result, workspace_dir)
-            achieved, feedback = await self.check_goal(
-                goal, result, workspace_dir,
-            )
-            result.goal_achieved = achieved
-            result.goal_feedback = feedback
-            # Re-synthesize over the full task list (initial + repair).
-            result.synthesis = ""
-            self._synthesize(goal, result)
 
         result.total_elapsed += time.perf_counter() - start_check
+        return result
+
+    async def repair_round(
+        self,
+        goal: str,
+        result: OrchestratorResult,
+        workspace_dir: str | None = None,
+        *,
+        parallel: bool = False,
+        verify: bool = False,
+    ) -> OrchestratorResult:
+        """Plan and run ONE targeted repair round against the current
+        audit gaps (``result.goal_feedback``), execute it in the same
+        workspace, then re-audit and re-synthesize over the full task
+        list.
+
+        Mutates and returns ``result``: appends the repair tasks, *adds*
+        to ``repair_tasks_added`` (so it accumulates across rounds), and
+        updates ``goal_achieved`` / ``goal_feedback`` / ``synthesis``.
+
+        Shared by ``run_goal``'s built-in single repair pass and the
+        on-demand "continue" path — the same logic whether the round is
+        automatic or a human pushing a run past the one round the
+        auto-pass allows. Raises ``ValueError`` when the planner can't
+        produce a repair plan.
+        """
+        runner = self.run_parallel if parallel else self.run
+        repair_tasks = await self.plan_repair(
+            goal, result.goal_feedback, result,
+            workspace_dir=workspace_dir, verify=verify,
+        )
+        await runner(goal, repair_tasks, workspace_dir=workspace_dir)
+        result.tasks.extend(repair_tasks)
+        result.repair_tasks_added += len(repair_tasks)
+        await self._refresh_run_outputs(result, workspace_dir)
+        achieved, feedback = await self.check_goal(goal, result, workspace_dir)
+        result.goal_achieved = achieved
+        result.goal_feedback = feedback
+        # Re-synthesize over the full task list (initial + all repairs).
+        result.synthesis = ""
+        self._synthesize(goal, result)
         return result
 
     async def _run_agent(

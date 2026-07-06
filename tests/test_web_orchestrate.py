@@ -270,3 +270,17 @@ class TestChatProjectsUI:
 
     def test_detail_opens_files_for_chat(self):
         assert "data.source === 'chat' || data.state === 'files'" in HTML
+
+
+class TestContinueButton:
+    def test_continue_button_present(self):
+        assert 'id="orch-continue-btn"' in HTML
+
+    def test_continue_handler_posts_to_endpoint(self):
+        assert "function orchContinue" in HTML
+        assert "/continue" in HTML
+
+    def test_continue_shown_only_when_goal_incomplete(self):
+        # Button is gated on a finished run with an incomplete goal audit.
+        assert "data.goal_achieved === false" in HTML
+        assert "orchContinue" in HTML  # wired to a click listener

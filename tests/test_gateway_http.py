@@ -6311,3 +6311,138 @@ class TestChatProjectsConsolidation:
         data = client.get("/api/orchestrations").json()["orchestrations"]
         assert not [r for r in data if r.get("source") == "chat"]
         assert client.get("/api/orchestrate/chat_webchat-h/files").status_code == 404
+
+
+class TestOrchestrateContinue:
+    """POST /api/orchestrate/<id>/continue runs another repair round on a
+    finished run whose goal audit came back incomplete — the human-in-the
+    loop past run_goal's single automatic round."""
+
+    def _seed_incomplete(self, gateway, tmp_path, oid="run-incomplete"):
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "app.py").write_text("def hello():\n    return 'hi'\n")
+        gateway._orch_history[oid] = {
+            "orchestration_id": oid,
+            "goal": "app.py with hello() and goodbye()",
+            "state": "completed",
+            "planned": False,
+            "workspace_dir": str(ws),
+            "goal_achieved": False,
+            "goal_feedback": "missing goodbye() in app.py",
+            "synthesis": "",
+            "repair_tasks_added": 0,
+            "tasks": [{
+                "role": "coder", "prompt": "write app.py",
+                "status": "completed", "result": "wrote hello",
+                "extract_to": "app.py", "depends_on": [], "with_tools": False,
+                "run_check": False, "verified": None, "attempts": 1,
+                "run_output": None, "extracted_path": str(ws / "app.py"),
+                "elapsed_ms": 10.0,
+            }],
+            "created_at": "2026-07-06T00:00:00+00:00",
+        }
+        return oid, ws
+
+    def _repair_dispatch(self):
+        state = {"audits": 0, "planner_prompt": None}
+
+        async def fake_dispatch(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            if role in ("reviewer", "auditor"):
+                state["audits"] += 1
+                if state["audits"] == 1:
+                    return "VERDICT: INCOMPLETE — missing goodbye() in app.py"
+                return "VERDICT: ACHIEVED"
+            if role == "planner":
+                state["planner_prompt"] = prompt
+                return (
+                    '[{"role": "coder", "prompt": "add goodbye() to app.py, '
+                    'produce the complete file", "extract_to": "app.py"}]'
+                )
+            return "```python\ndef hello():\n    return 'hi'\ndef goodbye():\n    return 'bye'\n```"
+
+        return fake_dispatch, state
+
+    def _run_to_completion(self, client, oid, timeout=10):
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        data = None
+        while _time.monotonic() < deadline:
+            data = client.get(f"/api/orchestrate/{oid}").json()
+            if data.get("state") != "running":
+                return data
+            _time.sleep(0.05)
+        return data
+
+    def test_continue_repairs_incomplete_run(self, gateway, tmp_path):
+        oid, ws = self._seed_incomplete(gateway, tmp_path)
+        fake, state = self._repair_dispatch()
+        gateway.dispatch_role_task = fake  # type: ignore[method-assign]
+
+        with TestClient(gateway._build_http_app()) as client:
+            resp = client.post(f"/api/orchestrate/{oid}/continue")
+            assert resp.status_code == 202
+            assert resp.json()["status_url"] == f"/api/orchestrate/{oid}"
+            data = self._run_to_completion(client, oid)
+
+        assert data["state"] == "completed"
+        assert data["goal_achieved"] is True
+        assert data["repair_tasks_added"] == 1
+        # The prior task is preserved and the repair task appended.
+        assert len(data["tasks"]) == 2
+        # The repair actually rewrote the file.
+        assert "goodbye" in (ws / "app.py").read_text()
+        # Repair planner saw the audit gaps.
+        assert "goodbye" in state["planner_prompt"]
+
+    def test_continue_accumulates_repair_count(self, gateway, tmp_path):
+        # A second continue keeps adding to repair_tasks_added rather
+        # than resetting — each round is additive.
+        oid, ws = self._seed_incomplete(gateway, tmp_path, oid="run-twice")
+        # Audit stays INCOMPLETE so a repair task is planned each round.
+        calls = {"n": 0}
+
+        async def always_incomplete(
+            role, role_system, prompt, *, session_id, max_tokens, temperature,
+            with_tools, task_type, exclude_workers,
+        ):
+            if role in ("reviewer", "auditor"):
+                return "VERDICT: INCOMPLETE — still missing goodbye()"
+            if role == "planner":
+                calls["n"] += 1
+                return '[{"role": "coder", "prompt": "fix it", "extract_to": "app.py"}]'
+            return "```python\ndef goodbye():\n    return 'bye'\n```"
+
+        gateway.dispatch_role_task = always_incomplete  # type: ignore[method-assign]
+        with TestClient(gateway._build_http_app()) as client:
+            assert client.post(f"/api/orchestrate/{oid}/continue").status_code == 202
+            first = self._run_to_completion(client, oid)
+            assert first["repair_tasks_added"] == 1
+            assert client.post(f"/api/orchestrate/{oid}/continue").status_code == 202
+            second = self._run_to_completion(client, oid)
+        assert second["repair_tasks_added"] == 2
+        assert len(second["tasks"]) == 3  # original + two repairs
+
+    def test_continue_unknown_id_404(self, gateway, client):
+        assert client.post("/api/orchestrate/nope/continue").status_code == 404
+
+    def test_continue_chat_project_rejected(self, gateway, client):
+        assert client.post("/api/orchestrate/chat_x/continue").status_code == 400
+
+    def test_continue_no_workspace_409(self, gateway, client):
+        gateway._orch_history["nows"] = {
+            "orchestration_id": "nows", "goal": "g", "state": "completed",
+            "planned": False, "workspace_dir": None, "goal_achieved": False,
+            "goal_feedback": "gap", "tasks": [], "created_at": "",
+        }
+        assert client.post("/api/orchestrate/nows/continue").status_code == 409
+
+    def test_continue_rejects_running(self, gateway, client):
+        gateway._orchestrations["live"] = {
+            "goal": "g", "tasks": [], "workspace_dir": None, "auto_plan": False,
+            "state": "running", "error": None, "result": None, "started_at": 0.0,
+        }
+        assert client.post("/api/orchestrate/live/continue").status_code == 409

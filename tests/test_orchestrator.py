@@ -1327,6 +1327,57 @@ class TestGoalCheckAndRepair:
         # coder, audit, planner, repair-coder, audit
         assert dispatcher.audits == 2
 
+    def test_repair_round_callable_directly_and_accumulates(self, tmp_path):
+        """repair_round is the shared primitive behind run_goal's auto
+        pass and the on-demand continue path: called directly it plans +
+        runs a round against the current goal_feedback, re-audits, and
+        ADDS to repair_tasks_added (so successive rounds accumulate)."""
+        from dreamland.config import DreamlandConfig
+
+        class _World:
+            def __init__(self) -> None:
+                self.roles: list[str] = []
+
+            def available_worker_count(self) -> int:
+                return 1
+
+            async def dispatch_role_task(  # noqa: PLR0913
+                self, role, role_system, prompt, *, session_id, max_tokens,
+                temperature, with_tools, task_type, exclude_workers,
+            ) -> str:
+                self.roles.append(role)
+                if role in ("reviewer", "auditor"):
+                    return "VERDICT: ACHIEVED"
+                if role == "planner":
+                    return ('[{"role": "coder", "prompt": "add goodbye()",'
+                            ' "extract_to": "app.py"}]')
+                return "```python\ndef goodbye():\n    return 'bye'\n```"
+
+        orch = Orchestrator(DreamlandConfig(), dispatcher=_World())
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "app.py").write_text("def hello():\n    return 'hi'\n")
+        result = OrchestratorResult(
+            tasks=[AgentTask(role="coder", prompt="write app.py")],
+        )
+        result.goal_feedback = "missing goodbye()"
+        result.repair_tasks_added = 0
+
+        out = asyncio.run(orch.repair_round(
+            "app.py with hello() and goodbye()", result, str(ws),
+        ))
+        assert out is result  # mutates in place
+        assert result.repair_tasks_added == 1
+        assert len(result.tasks) == 2
+        assert result.goal_achieved is True
+        assert "goodbye" in (ws / "app.py").read_text()
+
+        # A second round adds again rather than resetting the counter.
+        result.goal_feedback = "one more thing"
+        asyncio.run(orch.repair_round("goal", result, str(ws)))
+        assert result.repair_tasks_added == 2
+        assert len(result.tasks) == 3
+
     def test_repair_not_run_when_achieved(self):
         from dreamland.config import DreamlandConfig
 

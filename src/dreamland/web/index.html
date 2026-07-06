@@ -689,6 +689,9 @@ pre:hover .code-copy { opacity:1; }
                   title="Download the whole workspace as a zip">↓ zip</button>
           <button class="tb-btn" id="orch-git-btn"
                   title="Project commit history — every run is a commit">history</button>
+          <button class="tb-btn" id="orch-continue-btn"
+                  style="display:none;color:var(--green)"
+                  title="Run another repair round toward the goal">▶ continue</button>
         </div>
         <div class="fleet-list" id="orch-files-list"></div>
         <div id="orch-file-head" style="display:none;font-family:var(--mono);
@@ -1515,15 +1518,22 @@ pre:hover .code-copy { opacity:1; }
   function orchRender(data) {
     const statusEl = document.getElementById('orch-status');
     const listEl = document.getElementById('orch-tasks');
+    const continueBtn = document.getElementById('orch-continue-btn');
     const tasks = data.tasks || [];
     // Chat project: no run/tasks — a directory of files from a
     // conversation. Show its root and open the file browser directly.
     if (data.source === 'chat' || data.state === 'files') {
       statusEl.textContent = '💬 chat project · ' + (data.workspace_dir || '');
       listEl.innerHTML = '';
+      continueBtn.style.display = 'none';
       if (orchFileTargetId()) orchFilesLoad();
       return;
     }
+    // Continue is offered on a FINISHED run whose goal audit came back
+    // incomplete — the human deciding to push it one more repair round
+    // instead of the run silently dead-ending at one auto round.
+    continueBtn.style.display =
+      (data.state !== 'running' && data.goal_achieved === false) ? '' : 'none';
     const done = tasks.filter(t => t.status === 'completed').length;
     let line = data.state + ': ' + done + '/' + tasks.length + ' tasks';
     if (!tasks.length && data.state === 'running') line += ' (planning…)';
@@ -1719,6 +1729,23 @@ pre:hover .code-copy { opacity:1; }
     await apiDelete('/api/orchestrate/' + encodeURIComponent(orchId));
     await orchPoll();
     orchStop();
+  }
+
+  // Ask the server to run another repair round toward the goal on the
+  // attached (finished, incomplete) run. It resumes under the same id,
+  // so re-attaching picks up the live progress like any running build.
+  async function orchContinue() {
+    if (!orchId) return;
+    const btn = document.getElementById('orch-continue-btn');
+    btn.disabled = true;
+    btn.style.display = 'none';
+    try {
+      await apiPost('/api/orchestrate/' + encodeURIComponent(orchId) + '/continue', {});
+      orchNotifiedDone = null;  // let the next completion notify again
+      await orchAttach(orchId);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ---- File explorer / project code viewer ---------------------------
@@ -2900,6 +2927,7 @@ pre:hover .code-copy { opacity:1; }
   fleetCloseBtn.addEventListener('click',closeFleetPanel);
   document.getElementById('orch-start-btn').addEventListener('click',orchStart);
   document.getElementById('orch-cancel-btn').addEventListener('click',orchCancel);
+  document.getElementById('orch-continue-btn').addEventListener('click',orchContinue);
   document.getElementById('orch-files-btn').addEventListener('click',orchFilesLoad);
   document.getElementById('orch-git-btn').addEventListener('click',orchGitLog);
   document.getElementById('orch-addfiles-btn').addEventListener('click',function(){
