@@ -433,32 +433,53 @@ class Orchestrator:
         task.elapsed = time.perf_counter() - task_start
 
     @staticmethod
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        """Return the code inside the first fenced block in ``text``.
+
+        Tolerates the shapes models actually emit, including the two
+        that used to write a literal ```` ```python ```` into the file:
+
+          ```` ```python\\n...\\n``` ````  — well-formed, language stripped
+          ```` ```\\n...\\n``` ````        — no language tag
+          ```` ```python\\n...(EOF) ````   — OPENING fence, NO close: the
+                                     model hit max_tokens mid-file or
+                                     just forgot the close. Strip the
+                                     opening line anyway instead of
+                                     falling back to the whole string
+                                     (which starts with ```` ``` ```` and is an
+                                     instant SyntaxError).
+          {code with no fences}    — returns the stripped text as-is.
+        """
+        import re
+        # Well-formed block: opening fence (any chars on the tag line) →
+        # body → closing fence. Non-greedy so the first block wins.
+        m = re.search(r"```[^\n]*\n(.*?)\n?```", text, re.DOTALL)
+        if m:
+            return m.group(1)
+        # Opening fence but no close (truncation / omission): take
+        # everything after the first fence line, and trim any dangling
+        # partial closing fence at the very end.
+        m = re.search(r"```[^\n]*\n(.*)", text, re.DOTALL)
+        if m:
+            return re.sub(r"\n?```[^\n]*$", "", m.group(1))
+        return text.strip()
+
+    @staticmethod
     def _extract_and_write(task: AgentTask, workspace_dir: str) -> None:
         """Pull the first fenced code block out of `task.result` and
         write it to `workspace_dir / task.extract_to`.
 
-        Handles three common shapes the model produces:
-          ```python\n...```      — language tag we strip
-          ```\n...```            — no language tag
-          {code with no fences}  — falls through, writes the whole
-                                   stripped result if no fence found
-
-        On a successful write `task.extracted_path` is populated with
-        the absolute path so callers downstream can read it back.
+        Python output is syntax-validated BEFORE the file is written, so
+        a rejected extraction never leaves a broken file on disk to
+        poison the goal re-audit or a dependent task. On a successful
+        write `task.extracted_path` is populated with the absolute path
+        so callers downstream can read it back.
         """
-        import re
         from pathlib import Path
         if task.extract_to is None:
             return
-        text = task.result or ""
-        # Match fenced blocks; tolerate language tags and trailing
-        # whitespace. DOTALL so newlines in the body are kept.
-        match = re.search(
-            r"```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)```",
-            text,
-            re.DOTALL,
-        )
-        body = match.group(1) if match else text.strip()
+        body = Orchestrator._strip_code_fences(task.result or "")
         if not body.endswith("\n"):
             body += "\n"
         # Reject path traversal — task.extract_to should land inside
@@ -470,24 +491,20 @@ class Orchestrator:
                 f"extract_to path {task.extract_to!r} resolves outside "
                 f"workspace {workspace_dir}"
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body, encoding="utf-8")
-        task.extracted_path = str(target)
-        # Syntax-validate when the file looks like Python — catches the
-        # common failure mode where the model emits almost-valid code
-        # with a stray bracket or import line, which Codex would catch
-        # via py_compile and we'd previously discover only at run time.
-        # ast.parse is in-process and ~1ms; cheap enough to always run.
-        # Validation failure raises so the orchestrator retries this
-        # subtask on a different worker (model-quality issue is often
-        # stochastic — a re-roll succeeds where the first didn't).
+        # Syntax-validate Python BEFORE writing. ast.parse is in-process
+        # and ~1ms. Validation failure raises so the orchestrator retries
+        # this subtask on a different worker (model-quality issues are
+        # often stochastic — a re-roll succeeds where the first didn't).
+        # Crucially, raising here means the broken content is NOT written:
+        # a previous good file survives, and a never-succeeded file stays
+        # absent rather than becoming a ```python SyntaxError on disk.
         if target.suffix == ".py":
             import ast
             try:
                 tree = ast.parse(body)
             except SyntaxError as exc:
                 raise TaskRejectedError(
-                    f"extract_to wrote {target.name} but it has a "
+                    f"extract_to for {target.name} produced a "
                     f"SyntaxError on line {exc.lineno}: {exc.msg}"
                 ) from exc
             # ast.parse accepts a bare identifier ("write_file") as
@@ -532,10 +549,16 @@ class Orchestrator:
             has_substance = any(_substantive(node) for node in tree.body)
             if not has_substance:
                 raise TaskRejectedError(
-                    f"extract_to wrote {target.name} but it has no "
-                    "substantive code (no def/class/assignment/import) — "
+                    f"extract_to for {target.name} produced no substantive "
+                    "code (no def/class/assignment/import) — "
                     f"got {body[:80]!r}"
                 )
+
+        # Validation passed (or non-Python): commit to disk now — never
+        # before, so a rejected extraction can't leave a broken file.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        task.extracted_path = str(target)
 
     async def _exec_file_once(
         self, path: str, workspace_dir: str,

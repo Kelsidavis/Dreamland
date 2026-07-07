@@ -2,11 +2,14 @@
 
 import asyncio
 
+import pytest
+
 from dreamland.agent.orchestrator import (
     ROLE_PROMPTS,
     AgentTask,
     Orchestrator,
     OrchestratorResult,
+    TaskRejectedError,
 )
 
 
@@ -629,6 +632,43 @@ class TestOrchestratorWithDispatcher:
             not (tmp_path / "escape.py").exists()
         # And the original error surfaces in the task result.
         assert "outside workspace" in tasks[0].result
+
+    def test_strip_fences_unterminated_opening_fence(self):
+        """A model that emits an opening ```python fence but no closing
+        fence (max_tokens truncation, or just forgot) must NOT leak the
+        fence into the file — the old fallback wrote the whole string, so
+        line 1 became ```python and every run died with SyntaxError."""
+        out = Orchestrator._strip_code_fences(
+            "```python\ndef step(dt):\n    return dt\n"
+        )
+        assert not out.lstrip().startswith("```")
+        assert "def step" in out
+
+    def test_strip_fences_well_formed_and_plain(self):
+        assert Orchestrator._strip_code_fences(
+            "pre\n```python\nx = 1\n```\npost").strip() == "x = 1"
+        assert Orchestrator._strip_code_fences("y = 2\n").strip() == "y = 2"
+
+    def test_rejected_extraction_does_not_clobber_prior_good_file(self, tmp_path):
+        """Validation happens BEFORE the write, so a rejected (broken)
+        extraction leaves the previous good file intact instead of
+        overwriting it with garbage — the bug that made the repair loop
+        chase a ```python-poisoned workspace forever."""
+        ws = str(tmp_path)
+        good = AgentTask(role="coder", prompt="p", extract_to="physics.py")
+        good.result = "```python\ndef step(dt):\n    return dt\n```"
+        Orchestrator._extract_and_write(good, ws)
+        assert "def step" in (tmp_path / "physics.py").read_text()
+
+        bad = AgentTask(role="coder", prompt="p", extract_to="physics.py")
+        # Unterminated fence + incomplete code — invalid Python.
+        bad.result = "```python\ndef step(dt):\n    x = (\n"
+        with pytest.raises(TaskRejectedError):
+            Orchestrator._extract_and_write(bad, ws)
+        # Prior good file preserved; no ``` leaked onto disk.
+        disk = (tmp_path / "physics.py").read_text()
+        assert "def step" in disk and "```" not in disk
+        assert bad.extracted_path is None
 
     def test_retry_max_attempts_floor_is_one(self):
         """max_attempts<=0 should clamp to 1 — orchestrator must always
